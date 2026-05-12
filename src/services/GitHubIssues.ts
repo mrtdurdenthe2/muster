@@ -45,11 +45,18 @@ export interface IssueCreateResult {
 
 const repositoryNameFromApiUrl = (url: string): string => url.replace(/^https:\/\/api\.github\.com\/repos\//, "")
 const issueCreateUrl = (repository: string): string => `https://github.com/${repository}/issues/new`
-const isBrowserOpenError = (error: CommandError): boolean =>
-  error.detail.includes("xdg-open") ||
-  error.detail.includes("x-www-browser") ||
-  error.detail.includes("www-browser") ||
-  error.detail.includes("wslview")
+const isBrowserOpenError = (error: CommandError): boolean => {
+  const detail = error.detail.toLowerCase()
+  return (
+    detail.includes("xdg-open") ||
+    detail.includes("x-www-browser") ||
+    detail.includes("www-browser") ||
+    detail.includes("wslview") ||
+    detail.includes("could not open browser") ||
+    detail.includes("failed to open browser") ||
+    (detail.includes("exec:") && detail.includes("no such file or directory"))
+  )
+}
 
 export interface GitHubIssues {
   readonly searchAssigned: (options?: IssueSearchOptions) => Effect.Effect<
