@@ -659,6 +659,7 @@ const expandSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
   }
 
   shell.issueList.visible = false
+  shell.details.width = "100%"
   shell.details.setExpanded(true)
   shell.footer.content = "Esc collapse issue · N new issue · r to refresh · q to quit"
   shell.status.content = "Issue expanded."
@@ -666,6 +667,7 @@ const expandSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
 
 const collapseSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
   shell.issueList.visible = true
+  shell.details.width = "auto"
   shell.details.setExpanded(false)
   shell.footer.content = "↑/↓ or j/k to move · enter to select · N new issue · r to refresh · q to quit"
   shell.status.content = "Issue list restored."
