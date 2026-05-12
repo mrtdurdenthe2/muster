@@ -96,6 +96,17 @@ const wrapText = (value: string, width: number): ReadonlyArray<string> => {
   })
 }
 
+const limitedWrappedText = (value: string, width: number, maxLines: number): ReadonlyArray<string> => {
+  const lines = wrapText(value, width)
+  if (lines.length <= maxLines) return lines
+  if (maxLines <= 0) return []
+
+  const visible = lines.slice(0, maxLines)
+  const lastLine = visible[visible.length - 1]
+  visible[visible.length - 1] = width <= 1 ? "…" : `${lastLine.slice(0, width - 1)}…`
+  return visible
+}
+
 const issueToOption = (issue: GitHubIssue, issues: GitHubIssues): SelectOption => {
   const repository = issues.repositoryNameFromApiUrl(issue.repository_url)
   const labels = issue.labels.map((label) => label.name).join(", ")
@@ -197,6 +208,8 @@ class IssueDetailsRenderable extends Renderable {
       const hint = this.expanded ? "Esc collapse" : "Enter expand"
       this.frameBuffer.drawText(truncate(hint, Math.max(0, this.width - 2)), 1, 2, this.mutedColor)
 
+      const contentWidth = Math.max(0, this.width - 4)
+      const contentHeight = Math.max(0, this.height - 5)
       const body = value.issue.body?.trim() || "No description provided."
       const detailLines = [
         `Author: ${value.issue.user.login}`,
@@ -204,13 +217,13 @@ class IssueDetailsRenderable extends Renderable {
         `Updated: ${formatDate(value.issue.updated_at)}`,
         value.issue.html_url,
         "",
-        ...wrapText(body, Math.max(0, this.width - 4)),
+        ...limitedWrappedText(body, contentWidth, Math.max(0, contentHeight - 5)),
       ]
 
-      detailLines.slice(0, Math.max(0, this.height - 5)).forEach((line, index) => {
+      detailLines.slice(0, contentHeight).forEach((line, index) => {
         const y = index + 4
         const color = line === value.issue.html_url ? this.linkColor : line === "" ? this.mutedColor : this.textColor
-        this.frameBuffer?.drawText(truncate(line, Math.max(0, this.width - 4)), 2, y, color)
+        this.frameBuffer?.drawText(truncate(line, contentWidth), 2, y, color)
       })
     }
   }
