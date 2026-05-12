@@ -27,6 +27,14 @@ interface IssueListRow {
   readonly optionIndex?: number
 }
 
+interface IssueDraft {
+  readonly repository: string
+  readonly title: string
+  readonly body: string
+}
+
+type IssueCreatorField = "title" | "body"
+
 const appLayer = Layer.merge(GitHubCliLive, GitHubIssuesLive)
 
 const renderAuthHelp = (error: GitHubCliUnavailable | GitHubCliUnauthenticated): string =>
@@ -226,6 +234,188 @@ class IssueListRenderable extends Renderable {
   }
 }
 
+class IssueCreatorRenderable extends Renderable {
+  protected _focusable = true
+
+  private repository = ""
+  private title = ""
+  private body = ""
+  private activeField: IssueCreatorField = "title"
+  private message = ""
+  private submitting = false
+  private readonly backgroundColor = parseColor("#0d1117")
+  private readonly borderColor = parseColor("#30363d")
+  private readonly titleColor = parseColor("#58a6ff")
+  private readonly labelColor = parseColor("#8b949e")
+  private readonly textColor = parseColor("#c9d1d9")
+  private readonly mutedColor = parseColor("#6e7681")
+  private readonly activeColor = parseColor("#1f6feb")
+  private readonly errorColor = parseColor("#f85149")
+  private readonly onSubmit: (draft: IssueDraft) => void
+  private readonly onCancel: () => void
+
+  constructor(
+    ctx: CliRenderer,
+    options: RenderableOptions<IssueCreatorRenderable> & {
+      onSubmit: (draft: IssueDraft) => void
+      onCancel: () => void
+    },
+  ) {
+    super(ctx, { ...options, buffered: true, visible: false })
+    this.onSubmit = options.onSubmit
+    this.onCancel = options.onCancel
+  }
+
+  public open(repository: string): void {
+    this.repository = repository
+    this.title = ""
+    this.body = ""
+    this.activeField = "title"
+    this.message = ""
+    this.submitting = false
+    this.visible = true
+    this.focus()
+    this.requestRender()
+  }
+
+  public close(): void {
+    this.visible = false
+    this.requestRender()
+  }
+
+  public setSubmitting(submitting: boolean): void {
+    this.submitting = submitting
+    this.message = submitting ? "Creating issue..." : ""
+    this.requestRender()
+  }
+
+  public setMessage(message: string): void {
+    this.submitting = false
+    this.message = message
+    this.requestRender()
+  }
+
+  public handleKeyPress(key: KeyEvent): boolean {
+    if (!this.visible) return false
+    if (this.submitting) return true
+
+    if (key.name === "escape") {
+      this.close()
+      this.onCancel()
+      return true
+    }
+
+    if (key.ctrl && key.name === "s") {
+      const title = this.title.trim()
+      if (!title) {
+        this.message = "Title is required."
+        this.requestRender()
+        return true
+      }
+
+      this.onSubmit({ repository: this.repository, title, body: this.body.trim() })
+      return true
+    }
+
+    if (key.name === "tab") {
+      this.activeField = this.activeField === "title" ? "body" : "title"
+      this.requestRender()
+      return true
+    }
+
+    if (key.name === "return" || key.name === "linefeed") {
+      if (this.activeField === "title") {
+        this.activeField = "body"
+      } else {
+        this.body += "\n"
+      }
+      this.requestRender()
+      return true
+    }
+
+    if (key.name === "backspace") {
+      if (this.activeField === "title") {
+        this.title = this.title.slice(0, -1)
+      } else {
+        this.body = this.body.slice(0, -1)
+      }
+      this.requestRender()
+      return true
+    }
+
+    if (key.name === "space") {
+      this.appendText(" ")
+      return true
+    }
+
+    if (!key.ctrl && !key.meta && key.raw.length > 0 && !key.raw.includes("\x1b")) {
+      this.appendText(key.raw)
+      return true
+    }
+
+    return true
+  }
+
+  protected renderSelf(buffer: OptimizedBuffer, _deltaTime: number): void {
+    if (!this.visible || !this.frameBuffer) return
+
+    if (this.isDirty) {
+      this.frameBuffer.clear(this.backgroundColor)
+      this.drawBox()
+      this.frameBuffer.drawText(" New GitHub Issue ", 2, 0, this.titleColor)
+      this.frameBuffer.drawText(`Repository: ${this.repository}`, 2, 2, this.labelColor)
+      this.drawField("title", "Title", this.title, 4, 1)
+      this.drawField("body", "Body", this.body || "Optional description", 6, Math.max(3, this.height - 10))
+
+      const help = "Tab switch fields · Ctrl+S create · Esc cancel"
+      this.frameBuffer.drawText(help, 2, this.height - 3, this.mutedColor)
+      if (this.message) {
+        const color = this.message === "Title is required." ? this.errorColor : this.labelColor
+        this.frameBuffer.drawText(truncate(this.message, this.width - 4), 2, this.height - 2, color)
+      }
+    }
+  }
+
+  private appendText(value: string): void {
+    if (this.activeField === "title") {
+      this.title += value.replace(/[\r\n]/g, "")
+    } else {
+      this.body += value
+    }
+    this.message = ""
+    this.requestRender()
+  }
+
+  private drawBox(): void {
+    this.frameBuffer?.fillRect(0, 0, this.width, 1, this.borderColor)
+    this.frameBuffer?.fillRect(0, this.height - 1, this.width, 1, this.borderColor)
+    for (let y = 1; y < this.height - 1; y++) {
+      this.frameBuffer?.drawText("│", 0, y, this.borderColor)
+      this.frameBuffer?.drawText("│", this.width - 1, y, this.borderColor)
+    }
+  }
+
+  private drawField(field: IssueCreatorField, label: string, value: string, labelY: number, height: number): void {
+    const active = this.activeField === field
+    const y = labelY + 1
+    this.frameBuffer?.drawText(`${label}${active ? " *" : ""}`, 2, labelY, active ? this.activeColor : this.labelColor)
+    this.frameBuffer?.fillRect(2, y, this.width - 4, height, parseColor(active ? "#161b22" : "#0d1117"))
+
+    const lines = value.split("\n").slice(0, height)
+    lines.forEach((line, index) => {
+      const color = field === "body" && !this.body ? this.mutedColor : this.textColor
+      this.frameBuffer?.drawText(truncate(line, this.width - 6), 3, y + index, color)
+    })
+
+    if (active && !this.submitting) {
+      const lastLine = lines.at(-1) ?? ""
+      const cursorY = y + Math.min(lines.length - 1, height - 1)
+      const cursorX = Math.min(3 + lastLine.length, this.width - 4)
+      this.frameBuffer?.drawText("_", cursorX, cursorY, this.activeColor)
+    }
+  }
+}
+
 const loadIssues = Effect.gen(function* () {
   const issues = yield* GitHubIssues
   const response = yield* issues.searchAssigned({ limit: 50 })
@@ -310,9 +500,26 @@ const createShell = (renderer: CliRenderer) => {
   })
   container.add(footer)
 
+  const issueCreator = new IssueCreatorRenderable(renderer, {
+    id: "issue-creator",
+    position: "absolute",
+    left: Math.max(2, Math.floor((renderer.terminalWidth - Math.min(82, renderer.terminalWidth - 4)) / 2)),
+    top: Math.max(2, Math.floor((renderer.terminalHeight - Math.min(20, renderer.terminalHeight - 4)) / 2)),
+    width: Math.min(82, renderer.terminalWidth - 4),
+    height: Math.min(20, renderer.terminalHeight - 4),
+    zIndex: 20,
+    onSubmit: (draft) => createIssueFromDraft(shell, draft),
+    onCancel: () => {
+      status.content = "Issue creation cancelled."
+      issueList.focus()
+    },
+  })
+  renderer.root.add(issueCreator)
+
   issueList.focus()
 
-  return { status, issueList, details }
+  const shell = { status, issueList, details, issueCreator }
+  return shell
 }
 
 const refreshIssues = (shell: ReturnType<typeof createShell>): void => {
@@ -340,7 +547,7 @@ const refreshIssues = (shell: ReturnType<typeof createShell>): void => {
   })
 }
 
-const createIssueForSelectedRepository = (shell: ReturnType<typeof createShell>): void => {
+const openIssueCreatorForSelectedRepository = (shell: ReturnType<typeof createShell>): void => {
   const selectedOption = shell.issueList.getSelectedOption()
   if (!selectedOption) {
     shell.status.content = "Select a repository issue before creating a new issue."
@@ -348,12 +555,18 @@ const createIssueForSelectedRepository = (shell: ReturnType<typeof createShell>)
   }
 
   const { repository } = selectedOption.value as IssueOptionValue
-  shell.status.content = `Opening GitHub issue creator for ${repository}…`
+  shell.status.content = `Creating a new issue in ${repository}.`
+  shell.issueCreator.open(repository)
+}
+
+const createIssueFromDraft = (shell: ReturnType<typeof createShell>, draft: IssueDraft): void => {
+  shell.status.content = `Creating issue in ${draft.repository}...`
+  shell.issueCreator.setSubmitting(true)
 
   Effect.runPromise(
     Effect.gen(function* () {
       const issues = yield* GitHubIssues
-      return yield* issues.createInBrowser({ repository })
+      return yield* issues.create(draft)
     }).pipe(
       Effect.provide(appLayer),
       Effect.match({
@@ -363,14 +576,14 @@ const createIssueForSelectedRepository = (shell: ReturnType<typeof createShell>)
     ),
   ).then((result) => {
     if (result._tag === "Failure") {
-      shell.status.content = "Unable to open issue creator."
-      shell.details.content = result.message
+      shell.status.content = "Unable to create issue."
+      shell.issueCreator.setMessage(result.message)
       return
     }
 
-    shell.status.content = result.result.opened
-      ? `Opened GitHub issue creator for ${repository}. Press r to refresh after creating it.`
-      : `Issue creator URL ready for ${repository}. Press r to refresh after creating it.`
+    shell.issueCreator.close()
+    shell.issueList.focus()
+    shell.status.content = `Created issue in ${draft.repository}. Press r to refresh.`
     shell.details.content = result.result.url
   })
 }
@@ -380,6 +593,12 @@ const main = async (): Promise<void> => {
   const shell = createShell(renderer)
 
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
+    if (shell.issueCreator.visible) {
+      key.stopPropagation()
+      shell.issueCreator.handleKeyPress(key)
+      return
+    }
+
     if (key.name === "q" || key.sequence === "q" || key.raw === "q") {
       key.stopPropagation()
       renderer.destroy()
@@ -388,7 +607,7 @@ const main = async (): Promise<void> => {
     if (key.name === "r") refreshIssues(shell)
     if (key.name === "N" || key.sequence === "N" || key.raw === "N") {
       key.stopPropagation()
-      createIssueForSelectedRepository(shell)
+      openIssueCreatorForSelectedRepository(shell)
     }
   })
 
