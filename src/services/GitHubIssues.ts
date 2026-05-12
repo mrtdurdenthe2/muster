@@ -12,8 +12,10 @@ export const GitHubIssue = Schema.Struct({
   labels: Schema.Array(
     Schema.Struct({
       name: Schema.String,
+      color: Schema.optionalWith(Schema.String, { default: () => "" }),
     }),
   ),
+  body: Schema.optionalWith(Schema.Union(Schema.String, Schema.Null), { default: () => null }),
   user: Schema.Struct({
     login: Schema.String,
   }),

@@ -66,6 +66,47 @@ const formatDate = (value: string): string => {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
+const labelBackgroundColor = (color: string): string => (/^[0-9a-f]{6}$/i.test(color) ? `#${color}` : "#30363d")
+
+const labelTextColor = (color: string): string => {
+  if (!/^[0-9a-f]{6}$/i.test(color)) return "#c9d1d9"
+
+  const red = Number.parseInt(color.slice(0, 2), 16)
+  const green = Number.parseInt(color.slice(2, 4), 16)
+  const blue = Number.parseInt(color.slice(4, 6), 16)
+  return red * 0.299 + green * 0.587 + blue * 0.114 > 150 ? "#0d1117" : "#ffffff"
+}
+
+const wrapText = (value: string, width: number): ReadonlyArray<string> => {
+  if (width <= 0) return []
+
+  return value.split("\n").flatMap((line) => {
+    if (!line) return [""]
+
+    const wrapped: string[] = []
+    let remaining = line
+    while (remaining.length > width) {
+      const breakpoint = remaining.lastIndexOf(" ", width)
+      const end = breakpoint > 0 ? breakpoint : width
+      wrapped.push(remaining.slice(0, end))
+      remaining = remaining.slice(end).trimStart()
+    }
+    wrapped.push(remaining)
+    return wrapped
+  })
+}
+
+const limitedWrappedText = (value: string, width: number, maxLines: number): ReadonlyArray<string> => {
+  const lines = wrapText(value, width)
+  if (lines.length <= maxLines) return lines
+  if (maxLines <= 0) return []
+
+  const visible = lines.slice(0, maxLines)
+  const lastLine = visible[visible.length - 1]
+  visible[visible.length - 1] = width <= 1 ? "…" : `${lastLine.slice(0, width - 1)}…`
+  return visible
+}
+
 const issueToOption = (issue: GitHubIssue, issues: GitHubIssues): SelectOption => {
   const repository = issues.repositoryNameFromApiUrl(issue.repository_url)
   const labels = issue.labels.map((label) => label.name).join(", ")
@@ -79,22 +120,94 @@ const issueToOption = (issue: GitHubIssue, issues: GitHubIssues): SelectOption =
   }
 }
 
-const selectedIssueText = (option: SelectOption | null): string => {
-  if (!option) return "No issue selected."
-  const value = option.value as IssueOptionValue
-  const labels = value.issue.labels.map((label) => label.name).join(", ") || "none"
+class IssueDetailsRenderable extends Renderable {
+  private option: SelectOption | null = null
+  private message = "Select an issue to see details."
+  private expanded = false
+  private readonly backgroundColor = parseColor("#0d1117")
+  private readonly barColor = parseColor("#161b22")
+  private readonly panelColor = parseColor("#161b22")
+  private readonly borderColor = parseColor("#30363d")
+  private readonly titleColor = parseColor("#f0f6fc")
+  private readonly textColor = parseColor("#c9d1d9")
+  private readonly mutedColor = parseColor("#8b949e")
+  private readonly linkColor = parseColor("#58a6ff")
 
-  return [
-    `${value.repository} #${value.issue.number}`,
-    value.issue.title,
-    "",
-    `Author: ${value.issue.user.login}`,
-    `State: ${value.issue.state}`,
-    `Updated: ${formatDate(value.issue.updated_at)}`,
-    `Labels: ${labels}`,
-    "",
-    value.issue.html_url,
-  ].join("\n")
+  constructor(ctx: CliRenderer, options: RenderableOptions<IssueDetailsRenderable>) {
+    super(ctx, { ...options, buffered: true })
+  }
+
+  public setOption(option: SelectOption | null): void {
+    this.option = option
+    this.message = option ? "" : "No issue selected."
+    this.requestRender()
+  }
+
+  public setMessage(message: string): void {
+    this.option = null
+    this.message = message
+    this.requestRender()
+  }
+
+  public setExpanded(expanded: boolean): void {
+    this.expanded = expanded
+    this.requestRender()
+  }
+
+  protected renderSelf(buffer: OptimizedBuffer, _deltaTime: number): void {
+    if (!this.visible || !this.frameBuffer) return
+
+    if (this.isDirty) {
+      this.frameBuffer.clear(this.backgroundColor)
+
+      if (!this.option) {
+        this.frameBuffer.fillRect(0, 0, this.width, this.height, this.panelColor)
+        this.frameBuffer.drawText(truncate(this.message, Math.max(0, this.width - 2)), 1, 1, this.mutedColor)
+        return
+      }
+
+      const value = this.option.value as IssueOptionValue
+      const barHeight = Math.min(3, this.height)
+      this.frameBuffer.fillRect(0, 0, this.width, barHeight, this.barColor)
+      this.frameBuffer.fillRect(0, barHeight, this.width, Math.max(0, this.height - barHeight), this.panelColor)
+      this.frameBuffer.fillRect(0, barHeight, this.width, 1, this.borderColor)
+
+      const title = `${value.repository} #${value.issue.number} · ${value.issue.title}`
+      let x = 1
+      this.frameBuffer.drawText(truncate(title, Math.max(0, this.width - 2)), x, 0, this.titleColor)
+
+      const labels = value.issue.labels
+      x = 1
+      for (const label of labels) {
+        const labelText = ` ${label.name} `
+        if (x + labelText.length >= this.width - 1) break
+        this.frameBuffer.fillRect(x, 1, labelText.length, 1, parseColor(labelBackgroundColor(label.color)))
+        this.frameBuffer.drawText(labelText, x, 1, parseColor(labelTextColor(label.color)))
+        x += labelText.length + 1
+      }
+      if (labels.length === 0) this.frameBuffer.drawText(" no labels ", 1, 1, this.mutedColor)
+
+      const hint = this.expanded ? "Esc collapse" : "Enter expand"
+      this.frameBuffer.drawText(truncate(hint, Math.max(0, this.width - 2)), 1, 2, this.mutedColor)
+
+      const contentWidth = Math.max(0, this.width - 4)
+      const contentHeight = Math.max(0, this.height - 5)
+      const body = value.issue.body?.trim() || "No description provided."
+      const metadataLines = this.expanded
+        ? [`Author: ${value.issue.user.login}`, `State: ${value.issue.state}`, `Updated: ${formatDate(value.issue.updated_at)}`, value.issue.html_url, ""]
+        : []
+      const detailLines = [
+        ...metadataLines,
+        ...limitedWrappedText(body, contentWidth, Math.max(0, contentHeight - metadataLines.length)),
+      ]
+
+      detailLines.slice(0, contentHeight).forEach((line, index) => {
+        const y = index + 4
+        const color = line === value.issue.html_url ? this.linkColor : line === "" ? this.mutedColor : this.textColor
+        this.frameBuffer?.drawText(truncate(line, contentWidth), 2, y, color)
+      })
+    }
+  }
 }
 
 const issuesGroupedByRepository = (options: ReadonlyArray<SelectOption>): ReadonlyArray<IssueListRow> => {
@@ -478,17 +591,15 @@ const createShell = (renderer: CliRenderer) => {
     width: Math.max(48, Math.floor(renderer.terminalWidth * 0.58)),
     height: Math.max(8, renderer.terminalHeight - 6),
     onSelectionChange: (option) => {
-      details.content = selectedIssueText(option)
+      details.setOption(option)
     },
   })
   body.add(issueList)
 
-  const details = new TextRenderable(renderer, {
+  const details = new IssueDetailsRenderable(renderer, {
     id: "details",
-    content: "Select an issue to see details.",
     width: "auto",
     height: Math.max(8, renderer.terminalHeight - 6),
-    fg: "#c9d1d9",
   })
   body.add(details)
 
@@ -518,13 +629,35 @@ const createShell = (renderer: CliRenderer) => {
 
   issueList.focus()
 
-  const shell = { status, issueList, details, issueCreator }
+  const shell = { status, issueList, details, issueCreator, footer }
   return shell
+}
+
+const expandSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
+  if (!shell.issueList.getSelectedOption()) {
+    shell.status.content = "Select an issue before expanding details."
+    return
+  }
+
+  shell.issueList.visible = false
+  shell.details.width = "100%"
+  shell.details.setExpanded(true)
+  shell.footer.content = "Esc collapse issue · N new issue · r to refresh · q to quit"
+  shell.status.content = "Issue expanded."
+}
+
+const collapseSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
+  shell.issueList.visible = true
+  shell.details.width = "auto"
+  shell.details.setExpanded(false)
+  shell.footer.content = "↑/↓ or j/k to move · enter to select · N new issue · r to refresh · q to quit"
+  shell.status.content = "Issue list restored."
+  shell.issueList.focus()
 }
 
 const refreshIssues = (shell: ReturnType<typeof createShell>): void => {
   shell.status.content = "Loading issues from GitHub CLI…"
-  shell.details.content = ""
+  shell.details.setMessage("")
 
   Effect.runPromise(
     loadIssues.pipe(
@@ -537,13 +670,13 @@ const refreshIssues = (shell: ReturnType<typeof createShell>): void => {
   ).then((result) => {
     if (result._tag === "Failure") {
       shell.status.content = "Unable to load issues."
-      shell.details.content = result.message
+      shell.details.setMessage(result.message)
       return
     }
 
     shell.issueList.options = result.result.options
     shell.status.content = `${result.result.options.length} shown · ${result.result.total} total matches`
-    shell.details.content = selectedIssueText(shell.issueList.getSelectedOption())
+    shell.details.setOption(shell.issueList.getSelectedOption())
   })
 }
 
@@ -584,7 +717,7 @@ const createIssueFromDraft = (shell: ReturnType<typeof createShell>, draft: Issu
     shell.issueCreator.close()
     shell.issueList.focus()
     shell.status.content = `Created issue in ${draft.repository}. Press r to refresh.`
-    shell.details.content = result.result.url
+    shell.details.setMessage(result.result.url)
   })
 }
 
@@ -599,9 +732,20 @@ const main = async (): Promise<void> => {
       return
     }
 
+    if (key.name === "escape" && !shell.issueList.visible) {
+      key.stopPropagation()
+      collapseSelectedIssue(shell)
+      return
+    }
+
     if (key.name === "q" || key.sequence === "q" || key.raw === "q") {
       key.stopPropagation()
       renderer.destroy()
+      return
+    }
+    if (key.name === "return" || key.name === "linefeed") {
+      key.stopPropagation()
+      expandSelectedIssue(shell)
       return
     }
     if (key.name === "r") refreshIssues(shell)
