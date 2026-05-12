@@ -38,7 +38,25 @@ export interface IssueCreateOptions {
   readonly repository: string
 }
 
+export interface IssueCreateResult {
+  readonly url: string
+  readonly opened: boolean
+}
+
 const repositoryNameFromApiUrl = (url: string): string => url.replace(/^https:\/\/api\.github\.com\/repos\//, "")
+const issueCreateUrl = (repository: string): string => `https://github.com/${repository}/issues/new`
+const isBrowserOpenError = (error: CommandError): boolean => {
+  const detail = error.detail.toLowerCase()
+  return (
+    detail.includes("xdg-open") ||
+    detail.includes("x-www-browser") ||
+    detail.includes("www-browser") ||
+    detail.includes("wslview") ||
+    detail.includes("could not open browser") ||
+    detail.includes("failed to open browser") ||
+    (detail.includes("exec:") && detail.includes("no such file or directory"))
+  )
+}
 
 export interface GitHubIssues {
   readonly searchAssigned: (options?: IssueSearchOptions) => Effect.Effect<
@@ -49,7 +67,7 @@ export interface GitHubIssues {
     ReadonlyArray<GitHubIssue>,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
   >
-  readonly createInBrowser: (options: IssueCreateOptions) => Effect.Effect<void, GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError>
+  readonly createInBrowser: (options: IssueCreateOptions) => Effect.Effect<IssueCreateResult, GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError>
   readonly repositoryNameFromApiUrl: (url: string) => string
 }
 
@@ -65,8 +83,15 @@ export const GitHubIssuesLive = Layer.effect(
 
     const listAssigned = (options?: IssueSearchOptions) => searchAssigned(options).pipe(Effect.map((response) => response.items))
 
-    const createInBrowser = ({ repository }: IssueCreateOptions) =>
-      github.command("createIssue", ["issue", "create", "--repo", repository, "--web"]).pipe(Effect.asVoid)
+    const createInBrowser = ({ repository }: IssueCreateOptions) => {
+      const url = issueCreateUrl(repository)
+      return github.command("createIssue", ["issue", "create", "--repo", repository, "--web", "--title", "", "--body", ""]).pipe(
+        Effect.as({ url, opened: true }),
+        Effect.catchTag("CommandError", (error) =>
+          isBrowserOpenError(error) ? Effect.succeed({ url, opened: false }) : Effect.fail(error),
+        ),
+      )
+    }
 
     return {
       searchAssigned,

@@ -353,12 +353,12 @@ const createIssueForSelectedRepository = (shell: ReturnType<typeof createShell>)
   Effect.runPromise(
     Effect.gen(function* () {
       const issues = yield* GitHubIssues
-      yield* issues.createInBrowser({ repository })
+      return yield* issues.createInBrowser({ repository })
     }).pipe(
       Effect.provide(appLayer),
       Effect.match({
         onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
-        onSuccess: () => ({ _tag: "Success" as const }),
+        onSuccess: (result) => ({ _tag: "Success" as const, result }),
       }),
     ),
   ).then((result) => {
@@ -368,7 +368,10 @@ const createIssueForSelectedRepository = (shell: ReturnType<typeof createShell>)
       return
     }
 
-    shell.status.content = `Opened GitHub issue creator for ${repository}. Press r to refresh after creating it.`
+    shell.status.content = result.result.opened
+      ? `Opened GitHub issue creator for ${repository}. Press r to refresh after creating it.`
+      : `Issue creator URL ready for ${repository}. Press r to refresh after creating it.`
+    shell.details.content = result.result.url
   })
 }
 
