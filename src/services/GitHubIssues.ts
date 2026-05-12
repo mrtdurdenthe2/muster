@@ -38,7 +38,18 @@ export interface IssueCreateOptions {
   readonly repository: string
 }
 
+export interface IssueCreateResult {
+  readonly url: string
+  readonly opened: boolean
+}
+
 const repositoryNameFromApiUrl = (url: string): string => url.replace(/^https:\/\/api\.github\.com\/repos\//, "")
+const issueCreateUrl = (repository: string): string => `https://github.com/${repository}/issues/new`
+const isBrowserOpenError = (error: CommandError): boolean =>
+  error.detail.includes("xdg-open") ||
+  error.detail.includes("x-www-browser") ||
+  error.detail.includes("www-browser") ||
+  error.detail.includes("wslview")
 
 export interface GitHubIssues {
   readonly searchAssigned: (options?: IssueSearchOptions) => Effect.Effect<
@@ -49,7 +60,7 @@ export interface GitHubIssues {
     ReadonlyArray<GitHubIssue>,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
   >
-  readonly createInBrowser: (options: IssueCreateOptions) => Effect.Effect<void, GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError>
+  readonly createInBrowser: (options: IssueCreateOptions) => Effect.Effect<IssueCreateResult, GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError>
   readonly repositoryNameFromApiUrl: (url: string) => string
 }
 
@@ -65,8 +76,15 @@ export const GitHubIssuesLive = Layer.effect(
 
     const listAssigned = (options?: IssueSearchOptions) => searchAssigned(options).pipe(Effect.map((response) => response.items))
 
-    const createInBrowser = ({ repository }: IssueCreateOptions) =>
-      github.command("createIssue", ["issue", "create", "--repo", repository, "--web"]).pipe(Effect.asVoid)
+    const createInBrowser = ({ repository }: IssueCreateOptions) => {
+      const url = issueCreateUrl(repository)
+      return github.command("createIssue", ["issue", "create", "--repo", repository, "--web", "--title", "", "--body", ""]).pipe(
+        Effect.as({ url, opened: true }),
+        Effect.catchTag("CommandError", (error) =>
+          isBrowserOpenError(error) ? Effect.succeed({ url, opened: false }) : Effect.fail(error),
+        ),
+      )
+    }
 
     return {
       searchAssigned,
