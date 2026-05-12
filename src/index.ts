@@ -13,7 +13,7 @@ import {
 import { Effect, Layer, Match, ParseResult } from "effect"
 import { CommandError, JsonParseError } from "./services/CommandRunner.js"
 import { GitHubCliLive, GitHubCliUnauthenticated, GitHubCliUnavailable } from "./services/GitHubCli.js"
-import { GitHubIssues, GitHubIssuesLive, type GitHubIssue } from "./services/GitHubIssues.js"
+import { GitHubIssues, GitHubIssuesLive, type GitHubIssue, type GitHubLabel } from "./services/GitHubIssues.js"
 
 interface IssueOptionValue {
   readonly issue: GitHubIssue
@@ -31,11 +31,28 @@ interface IssueDraft {
   readonly repository: string
   readonly title: string
   readonly body: string
+  readonly labels: ReadonlyArray<string>
 }
 
 type IssueCreatorField = "title" | "body"
 
 const appLayer = Layer.merge(GitHubCliLive, GitHubIssuesLive)
+
+const labelKey = (label: string): string => label.trim().toLocaleLowerCase()
+
+const uniqueLabels = (labels: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const seen = new Set<string>()
+  const unique: string[] = []
+  for (const label of labels) {
+    const trimmed = label.trim()
+    const key = labelKey(trimmed)
+    if (!key || seen.has(key)) continue
+
+    seen.add(key)
+    unique.push(trimmed)
+  }
+  return unique
+}
 
 const renderAuthHelp = (error: GitHubCliUnavailable | GitHubCliUnauthenticated): string =>
   Match.value(error).pipe(
@@ -117,96 +134,6 @@ const issueToOption = (issue: GitHubIssue, issues: GitHubIssues): SelectOption =
     name: truncate(issue.title, 90),
     description: descriptionParts.join(" · "),
     value: { issue, repository } satisfies IssueOptionValue,
-  }
-}
-
-class IssueDetailsRenderable extends Renderable {
-  private option: SelectOption | null = null
-  private message = "Select an issue to see details."
-  private expanded = false
-  private readonly backgroundColor = parseColor("#0d1117")
-  private readonly barColor = parseColor("#161b22")
-  private readonly panelColor = parseColor("#161b22")
-  private readonly borderColor = parseColor("#30363d")
-  private readonly titleColor = parseColor("#f0f6fc")
-  private readonly textColor = parseColor("#c9d1d9")
-  private readonly mutedColor = parseColor("#8b949e")
-  private readonly linkColor = parseColor("#58a6ff")
-
-  constructor(ctx: CliRenderer, options: RenderableOptions<IssueDetailsRenderable>) {
-    super(ctx, { ...options, buffered: true })
-  }
-
-  public setOption(option: SelectOption | null): void {
-    this.option = option
-    this.message = option ? "" : "No issue selected."
-    this.requestRender()
-  }
-
-  public setMessage(message: string): void {
-    this.option = null
-    this.message = message
-    this.requestRender()
-  }
-
-  public setExpanded(expanded: boolean): void {
-    this.expanded = expanded
-    this.requestRender()
-  }
-
-  protected renderSelf(buffer: OptimizedBuffer, _deltaTime: number): void {
-    if (!this.visible || !this.frameBuffer) return
-
-    if (this.isDirty) {
-      this.frameBuffer.clear(this.backgroundColor)
-
-      if (!this.option) {
-        this.frameBuffer.fillRect(0, 0, this.width, this.height, this.panelColor)
-        this.frameBuffer.drawText(truncate(this.message, Math.max(0, this.width - 2)), 1, 1, this.mutedColor)
-        return
-      }
-
-      const value = this.option.value as IssueOptionValue
-      const barHeight = Math.min(3, this.height)
-      this.frameBuffer.fillRect(0, 0, this.width, barHeight, this.barColor)
-      this.frameBuffer.fillRect(0, barHeight, this.width, Math.max(0, this.height - barHeight), this.panelColor)
-      this.frameBuffer.fillRect(0, barHeight, this.width, 1, this.borderColor)
-
-      const title = `${value.repository} #${value.issue.number} · ${value.issue.title}`
-      let x = 1
-      this.frameBuffer.drawText(truncate(title, Math.max(0, this.width - 2)), x, 0, this.titleColor)
-
-      const labels = value.issue.labels
-      x = 1
-      for (const label of labels) {
-        const labelText = ` ${label.name} `
-        if (x + labelText.length >= this.width - 1) break
-        this.frameBuffer.fillRect(x, 1, labelText.length, 1, parseColor(labelBackgroundColor(label.color)))
-        this.frameBuffer.drawText(labelText, x, 1, parseColor(labelTextColor(label.color)))
-        x += labelText.length + 1
-      }
-      if (labels.length === 0) this.frameBuffer.drawText(" no labels ", 1, 1, this.mutedColor)
-
-      const hint = this.expanded ? "Esc collapse" : "Enter expand"
-      this.frameBuffer.drawText(truncate(hint, Math.max(0, this.width - 2)), 1, 2, this.mutedColor)
-
-      const contentWidth = Math.max(0, this.width - 4)
-      const contentHeight = Math.max(0, this.height - 5)
-      const body = value.issue.body?.trim() || "No description provided."
-      const metadataLines = this.expanded
-        ? [`Author: ${value.issue.user.login}`, `State: ${value.issue.state}`, `Updated: ${formatDate(value.issue.updated_at)}`, value.issue.html_url, ""]
-        : []
-      const detailLines = [
-        ...metadataLines,
-        ...limitedWrappedText(body, contentWidth, Math.max(0, contentHeight - metadataLines.length)),
-      ]
-
-      detailLines.slice(0, contentHeight).forEach((line, index) => {
-        const y = index + 4
-        const color = line === value.issue.html_url ? this.linkColor : line === "" ? this.mutedColor : this.textColor
-        this.frameBuffer?.drawText(truncate(line, contentWidth), 2, y, color)
-      })
-    }
   }
 }
 
@@ -444,7 +371,12 @@ class IssueCreatorRenderable extends Renderable {
   private repository = ""
   private title = ""
   private body = ""
+  private availableLabels: ReadonlyArray<GitHubLabel> = []
+  private selectedLabels: ReadonlyArray<string> = []
   private activeField: IssueCreatorField = "title"
+  private labelPickerOpen = false
+  private labelSearch = ""
+  private labelSelectedIndex = 0
   private message = ""
   private submitting = false
   private readonly backgroundColor = parseColor("#0d1117")
@@ -474,7 +406,12 @@ class IssueCreatorRenderable extends Renderable {
     this.repository = repository
     this.title = ""
     this.body = ""
+    this.availableLabels = []
+    this.selectedLabels = []
     this.activeField = "title"
+    this.labelPickerOpen = false
+    this.labelSearch = ""
+    this.labelSelectedIndex = 0
     this.message = ""
     this.submitting = false
     this.visible = true
@@ -493,6 +430,13 @@ class IssueCreatorRenderable extends Renderable {
     this.requestRender()
   }
 
+  public setAvailableLabels(labels: ReadonlyArray<GitHubLabel>): void {
+    this.availableLabels = [...labels].sort((left, right) => left.name.localeCompare(right.name))
+    this.labelSelectedIndex = 0
+    this.message = this.message === "Loading labels..." ? "" : this.message
+    this.requestRender()
+  }
+
   public setMessage(message: string): void {
     this.submitting = false
     this.message = message
@@ -503,9 +447,20 @@ class IssueCreatorRenderable extends Renderable {
     if (!this.visible) return false
     if (this.submitting) return true
 
+    if (this.labelPickerOpen) return this.handleLabelPickerKeyPress(key)
+
     if (key.name === "escape") {
       this.close()
       this.onCancel()
+      return true
+    }
+
+    if (key.name === "l" || key.sequence === "l" || key.raw === "l") {
+      this.labelPickerOpen = true
+      this.labelSearch = ""
+      this.labelSelectedIndex = 0
+      this.message = ""
+      this.requestRender()
       return true
     }
 
@@ -517,7 +472,7 @@ class IssueCreatorRenderable extends Renderable {
         return true
       }
 
-      this.onSubmit({ repository: this.repository, title, body: this.body.trim() })
+      this.onSubmit({ repository: this.repository, title, body: this.body.trim(), labels: this.selectedLabels })
       return true
     }
 
@@ -568,16 +523,58 @@ class IssueCreatorRenderable extends Renderable {
       this.drawBox()
       this.frameBuffer.drawText(" New GitHub Issue ", 2, 0, this.titleColor)
       this.frameBuffer.drawText(`Repository: ${this.repository}`, 2, 2, this.labelColor)
-      this.drawField("title", "Title", this.title, 4, 1)
-      this.drawField("body", "Body", this.body || "Optional description", 6, Math.max(3, this.height - 10))
+      this.drawSelectedLabels(4)
+      this.drawField("title", "Title", this.title, 6, 1)
+      this.drawField("body", "Body", this.body || "Optional description", 8, Math.max(3, this.height - 12))
 
-      const help = "Tab switch fields · Ctrl+S create · Esc cancel"
+      const help = "Tab switch fields · l labels · Ctrl+S create · Esc cancel"
       this.frameBuffer.drawText(help, 2, this.height - 3, this.mutedColor)
       if (this.message) {
         const color = this.message === "Title is required." ? this.errorColor : this.labelColor
         this.frameBuffer.drawText(truncate(this.message, this.width - 4), 2, this.height - 2, color)
       }
+
+      if (this.labelPickerOpen) this.drawLabelPicker()
     }
+  }
+
+  private handleLabelPickerKeyPress(key: KeyEvent): boolean {
+    if (key.name === "escape") {
+      this.labelPickerOpen = false
+      this.requestRender()
+      return true
+    }
+
+    if (key.name === "up" || key.name === "k") {
+      this.moveLabelSelection(-1)
+      return true
+    }
+
+    if (key.name === "down" || key.name === "j") {
+      this.moveLabelSelection(1)
+      return true
+    }
+
+    if (key.name === "return" || key.name === "linefeed" || key.name === "space") {
+      this.toggleCurrentLabel()
+      return true
+    }
+
+    if (key.name === "backspace") {
+      this.labelSearch = this.labelSearch.slice(0, -1)
+      this.labelSelectedIndex = 0
+      this.requestRender()
+      return true
+    }
+
+    if (!key.ctrl && !key.meta && key.raw.length > 0 && !key.raw.includes("\x1b")) {
+      this.labelSearch += key.raw.replace(/[\r\n]/g, "")
+      this.labelSelectedIndex = 0
+      this.requestRender()
+      return true
+    }
+
+    return true
   }
 
   private appendText(value: string): void {
@@ -588,6 +585,80 @@ class IssueCreatorRenderable extends Renderable {
     }
     this.message = ""
     this.requestRender()
+  }
+
+  private drawSelectedLabels(y: number): void {
+    this.frameBuffer?.drawText("Labels", 2, y, this.labelColor)
+    const labels = this.selectedLabels.length > 0 ? this.selectedLabels.join(", ") : "none selected"
+    this.frameBuffer?.drawText(truncate(labels, this.width - 12), 10, y, this.selectedLabels.length > 0 ? this.textColor : this.mutedColor)
+  }
+
+  private filteredLabels(): ReadonlyArray<GitHubLabel> {
+    const search = labelKey(this.labelSearch)
+    if (!search) return this.availableLabels
+    return this.availableLabels.filter((label) => labelKey(label.name).includes(search))
+  }
+
+  private labelPickerOptions(): ReadonlyArray<{ readonly kind: "label" | "create"; readonly name: string; readonly color: string }> {
+    const filtered = this.filteredLabels().map((label) => ({ kind: "label" as const, name: label.name, color: label.color }))
+    const search = this.labelSearch.trim()
+    const hasExactMatch = this.availableLabels.some((label) => labelKey(label.name) === labelKey(search))
+    if (!search || hasExactMatch) return filtered
+    return [{ kind: "create", name: search, color: "" }, ...filtered]
+  }
+
+  private moveLabelSelection(delta: number): void {
+    const options = this.labelPickerOptions()
+    if (options.length === 0) return
+
+    this.labelSelectedIndex = Math.max(0, Math.min(this.labelSelectedIndex + delta, options.length - 1))
+    this.requestRender()
+  }
+
+  private toggleCurrentLabel(): void {
+    const option = this.labelPickerOptions()[this.labelSelectedIndex]
+    if (!option) return
+
+    const selected = this.selectedLabels.some((label) => labelKey(label) === labelKey(option.name))
+    this.selectedLabels = selected
+      ? this.selectedLabels.filter((label) => labelKey(label) !== labelKey(option.name))
+      : uniqueLabels([...this.selectedLabels, option.name])
+    this.labelSearch = option.kind === "create" ? "" : this.labelSearch
+    this.requestRender()
+  }
+
+  private drawLabelPicker(): void {
+    const left = 4
+    const top = 3
+    const width = Math.max(20, this.width - 8)
+    const height = Math.max(8, this.height - 6)
+    const options = this.labelPickerOptions()
+    this.labelSelectedIndex = Math.min(this.labelSelectedIndex, Math.max(0, options.length - 1))
+
+    this.frameBuffer?.fillRect(left, top, width, height, parseColor("#0d1117"))
+    this.frameBuffer?.fillRect(left, top, width, 1, this.borderColor)
+    this.frameBuffer?.fillRect(left, top + height - 1, width, 1, this.borderColor)
+    this.frameBuffer?.drawText(" Labels ", left + 2, top, this.titleColor)
+    this.frameBuffer?.drawText(`Search: ${this.labelSearch}_`, left + 2, top + 2, this.activeColor)
+
+    const listTop = top + 4
+    const listHeight = Math.max(0, height - 6)
+    if (options.length === 0) {
+      this.frameBuffer?.drawText("Type a label name to create it", left + 2, listTop, this.mutedColor)
+    }
+
+    options.slice(0, listHeight).forEach((option, index) => {
+      const selected = index === this.labelSelectedIndex
+      const checked = this.selectedLabels.some((label) => labelKey(label) === labelKey(option.name))
+      const y = listTop + index
+      if (selected) this.frameBuffer?.fillRect(left + 1, y, width - 2, 1, this.activeColor)
+
+      const prefix = option.kind === "create" ? "+" : checked ? "x" : " "
+      const text = `${prefix} ${option.kind === "create" ? `Create \"${option.name}\"` : option.name}`
+      this.frameBuffer?.drawText(truncate(text, width - 4), left + 2, y, selected ? parseColor("#ffffff") : this.textColor)
+    })
+
+    this.frameBuffer?.drawText("Enter/Space toggle · Esc close", left + 2, top + height - 2, this.mutedColor)
   }
 
   private drawBox(): void {
@@ -781,6 +852,29 @@ const openIssueCreatorForSelectedRepository = (shell: ReturnType<typeof createSh
   const { repository } = selectedOption.value as IssueOptionValue
   shell.status.content = `Creating a new issue in ${repository}.`
   shell.issueCreator.open(repository)
+  shell.issueCreator.setMessage("Loading labels...")
+
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const issues = yield* GitHubIssues
+      return yield* issues.listLabels(repository)
+    }).pipe(
+      Effect.provide(appLayer),
+      Effect.match({
+        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
+        onSuccess: (labels) => ({ _tag: "Success" as const, labels }),
+      }),
+    ),
+  ).then((result) => {
+    if (!shell.issueCreator.visible) return
+
+    if (result._tag === "Failure") {
+      shell.issueCreator.setMessage(`Unable to load labels: ${result.message}`)
+      return
+    }
+
+    shell.issueCreator.setAvailableLabels(result.labels)
+  })
 }
 
 const createIssueFromDraft = (shell: ReturnType<typeof createShell>, draft: IssueDraft): void => {
