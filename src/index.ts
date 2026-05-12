@@ -120,24 +120,6 @@ const issueToOption = (issue: GitHubIssue, issues: GitHubIssues): SelectOption =
   }
 }
 
-const selectedIssueText = (option: SelectOption | null): string => {
-  if (!option) return "No issue selected."
-  const value = option.value as IssueOptionValue
-  const labels = value.issue.labels.map((label) => label.name).join(", ") || "none"
-
-  return [
-    `${value.repository} #${value.issue.number}`,
-    value.issue.title,
-    "",
-    `Author: ${value.issue.user.login}`,
-    `State: ${value.issue.state}`,
-    `Updated: ${formatDate(value.issue.updated_at)}`,
-    `Labels: ${labels}`,
-    "",
-    value.issue.html_url,
-  ].join("\n")
-}
-
 class IssueDetailsRenderable extends Renderable {
   private option: SelectOption | null = null
   private message = "Select an issue to see details."
@@ -211,13 +193,12 @@ class IssueDetailsRenderable extends Renderable {
       const contentWidth = Math.max(0, this.width - 4)
       const contentHeight = Math.max(0, this.height - 5)
       const body = value.issue.body?.trim() || "No description provided."
+      const metadataLines = this.expanded
+        ? [`Author: ${value.issue.user.login}`, `State: ${value.issue.state}`, `Updated: ${formatDate(value.issue.updated_at)}`, value.issue.html_url, ""]
+        : []
       const detailLines = [
-        `Author: ${value.issue.user.login}`,
-        `State: ${value.issue.state}`,
-        `Updated: ${formatDate(value.issue.updated_at)}`,
-        value.issue.html_url,
-        "",
-        ...limitedWrappedText(body, contentWidth, Math.max(0, contentHeight - 5)),
+        ...metadataLines,
+        ...limitedWrappedText(body, contentWidth, Math.max(0, contentHeight - metadataLines.length)),
       ]
 
       detailLines.slice(0, contentHeight).forEach((line, index) => {
