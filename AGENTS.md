@@ -9,6 +9,7 @@ External source repositories are vendored under `repos/` as git subtrees:
 - `repos/effect` contains the Effect monorepo.
 - `repos/opentui` contains the OpenTUI monorepo.
 
+If you are unsure on how to use an effect method, please look through the effect codebase to see how it works and examples on how to use it.
 Use vendored repositories as read-only reference material when working with related libraries.
 
 - Prefer examples and patterns from vendored source over guesses or web search.

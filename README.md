@@ -2,6 +2,21 @@
 
 TUI for managing your issues across the land of GitHub.
 
+## GitHub Access
+
+muster uses the GitHub CLI for authentication so it does not manage or store GitHub tokens directly.
+
+Requirements:
+
+- Install `gh` from https://cli.github.com/.
+- Authenticate with `gh auth login --hostname github.com --web --scopes repo,read:org`.
+
+Run the current GitHub access smoke test with:
+
+```sh
+bun run start
+```
+
 ## Local Reference Repositories
 
 This project vendors external source repositories under `repos/` using squashed git subtrees so coding agents can inspect real implementation and usage patterns locally.
