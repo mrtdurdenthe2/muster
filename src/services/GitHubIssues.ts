@@ -34,6 +34,10 @@ export interface IssueSearchOptions {
   readonly limit?: number
 }
 
+export interface IssueCreateOptions {
+  readonly repository: string
+}
+
 const repositoryNameFromApiUrl = (url: string): string => url.replace(/^https:\/\/api\.github\.com\/repos\//, "")
 
 export interface GitHubIssues {
@@ -45,6 +49,7 @@ export interface GitHubIssues {
     ReadonlyArray<GitHubIssue>,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
   >
+  readonly createInBrowser: (options: IssueCreateOptions) => Effect.Effect<void, GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError>
   readonly repositoryNameFromApiUrl: (url: string) => string
 }
 
@@ -60,9 +65,13 @@ export const GitHubIssuesLive = Layer.effect(
 
     const listAssigned = (options?: IssueSearchOptions) => searchAssigned(options).pipe(Effect.map((response) => response.items))
 
+    const createInBrowser = ({ repository }: IssueCreateOptions) =>
+      github.command("createIssue", ["issue", "create", "--repo", repository, "--web"]).pipe(Effect.asVoid)
+
     return {
       searchAssigned,
       listAssigned,
+      createInBrowser,
       repositoryNameFromApiUrl,
     } as const
   }),
