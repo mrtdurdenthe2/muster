@@ -23,6 +23,13 @@ export const GitHubIssue = Schema.Struct({
 
 export type GitHubIssue = typeof GitHubIssue.Type
 
+export const GitHubLabel = Schema.Struct({
+  name: Schema.String,
+  color: Schema.optionalWith(Schema.String, { default: () => "" }),
+})
+
+export type GitHubLabel = typeof GitHubLabel.Type
+
 export const IssueSearchResponse = Schema.Struct({
   total_count: Schema.Number,
   incomplete_results: Schema.Boolean,
@@ -40,6 +47,7 @@ export interface IssueCreateOptions {
   readonly repository: string
   readonly title: string
   readonly body: string
+  readonly labels?: ReadonlyArray<string>
 }
 
 export interface IssueCreateResult {
@@ -57,7 +65,14 @@ export interface GitHubIssues {
     ReadonlyArray<GitHubIssue>,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
   >
-  readonly create: (options: IssueCreateOptions) => Effect.Effect<IssueCreateResult, GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError>
+  readonly listLabels: (repository: string) => Effect.Effect<
+    ReadonlyArray<GitHubLabel>,
+    GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
+  >
+  readonly create: (options: IssueCreateOptions) => Effect.Effect<
+    IssueCreateResult,
+    GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
+  >
   readonly repositoryNameFromApiUrl: (url: string) => string
 }
 
@@ -73,14 +88,48 @@ export const GitHubIssuesLive = Layer.effect(
 
     const listAssigned = (options?: IssueSearchOptions) => searchAssigned(options).pipe(Effect.map((response) => response.items))
 
-    const create = ({ repository, title, body }: IssueCreateOptions) =>
-      github.command("createIssue", ["issue", "create", "--repo", repository, "--title", title, "--body", body]).pipe(
+    const listLabels = (repository: string) =>
+      github.apiJson("listRepositoryLabels", Schema.Array(GitHubLabel), ["--method", "GET", `repos/${repository}/labels`, "-F", "per_page=100"])
+
+    const createLabel = (repository: string, name: string) =>
+      github.command("createLabel", ["label", "create", name, "--repo", repository, "--color", "ededed", "--description", "Created from muster"]).pipe(
+        Effect.asVoid,
+      )
+
+    const ensureLabels = (repository: string, labels: ReadonlyArray<string>) =>
+      labels.length === 0
+        ? Effect.void
+        : listLabels(repository).pipe(
+            Effect.flatMap((existingLabels) => {
+              const existing = new Set(existingLabels.map((label) => label.name.toLocaleLowerCase()))
+              const missing = labels.filter((label) => !existing.has(label.toLocaleLowerCase()))
+              return Effect.forEach(missing, (label) => createLabel(repository, label), { concurrency: 1 })
+            }),
+            Effect.asVoid,
+          )
+
+    const create = ({ repository, title, body, labels = [] }: IssueCreateOptions) =>
+      ensureLabels(repository, labels).pipe(
+        Effect.flatMap(() =>
+          github.command("createIssue", [
+            "issue",
+            "create",
+            "--repo",
+            repository,
+            "--title",
+            title,
+            "--body",
+            body,
+            ...labels.flatMap((label) => ["--label", label]),
+          ]),
+        ),
         Effect.map((result) => ({ url: result.stdout.trim() || `https://github.com/${repository}/issues` })),
       )
 
     return {
       searchAssigned,
       listAssigned,
+      listLabels,
       create,
       repositoryNameFromApiUrl,
     } as const
