@@ -364,8 +364,8 @@ class IssueCreatorRenderable extends Renderable {
       this.drawBox()
       this.frameBuffer.drawText(" New GitHub Issue ", 2, 0, this.titleColor)
       this.frameBuffer.drawText(`Repository: ${this.repository}`, 2, 2, this.labelColor)
-      this.drawField("title", "Title", this.title, 4, 3)
-      this.drawField("body", "Body", this.body || "Optional description", 7, Math.max(3, this.height - 11))
+      this.drawField("title", "Title", this.title, 4, 1)
+      this.drawField("body", "Body", this.body || "Optional description", 6, Math.max(3, this.height - 10))
 
       const help = "Tab switch fields · Ctrl+S create · Esc cancel"
       this.frameBuffer.drawText(help, 2, this.height - 3, this.mutedColor)
