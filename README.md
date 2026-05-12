@@ -11,7 +11,7 @@ Requirements:
 - Install `gh` from https://cli.github.com/.
 - Authenticate with `gh auth login --hostname github.com --web --scopes repo,read:org`.
 
-Run the current GitHub access smoke test with:
+Launch the issue list with:
 
 ```sh
 bun run start

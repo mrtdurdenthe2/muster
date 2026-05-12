@@ -55,8 +55,8 @@ export const GitHubIssuesLive = Layer.effect(
   Effect.gen(function* () {
     const github = yield* GitHubCli
 
-    const searchAssigned = ({ query = "assignee:@me is:issue is:open archived:false", limit = 50 }: IssueSearchOptions = {}) =>
-      github.apiJson("searchAssignedIssues", IssueSearchResponse, ["search/issues", "-f", `q=${query}`, "-F", `per_page=${limit}`])
+    const searchAssigned = ({ query = "involves:@me is:issue is:open archived:false", limit = 50 }: IssueSearchOptions = {}) =>
+      github.apiJson("searchAssignedIssues", IssueSearchResponse, ["--method", "GET", "search/issues", "-f", `q=${query}`, "-F", `per_page=${limit}`])
 
     const listAssigned = (options?: IssueSearchOptions) => searchAssigned(options).pipe(Effect.map((response) => response.items))
 
