@@ -9,6 +9,7 @@ External source repositories are vendored under `repos/` as git subtrees:
 - `repos/effect` contains the Effect monorepo.
 - `repos/opentui` contains the OpenTUI monorepo.
 
+When using TypeScript, please try to use Effect as much as possible (within reason)
 If you are unsure on how to use an effect method, please look through the effect codebase to see how it works and examples on how to use it.
 Use vendored repositories as read-only reference material when working with related libraries.
 
