@@ -600,6 +600,7 @@ const createShell = (renderer: CliRenderer) => {
     id: "details",
     width: "auto",
     height: Math.max(8, renderer.terminalHeight - 6),
+    flexGrow: 1,
   })
   body.add(details)
 
