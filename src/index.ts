@@ -348,6 +348,7 @@ const main = async (): Promise<void> => {
     if (key.name === "q" || key.sequence === "q" || key.raw === "q") {
       key.stopPropagation()
       renderer.destroy()
+      return
     }
     if (key.name === "r") refreshIssues(shell)
   })
