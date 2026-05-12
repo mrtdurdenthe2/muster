@@ -304,7 +304,7 @@ const createShell = (renderer: CliRenderer) => {
 
   const footer = new TextRenderable(renderer, {
     id: "footer",
-    content: "↑/↓ or j/k to move · enter to select · r to refresh · q to quit",
+    content: "↑/↓ or j/k to move · enter to select · N new issue · r to refresh · q to quit",
     height: 1,
     fg: "#8b949e",
   })
@@ -340,6 +340,38 @@ const refreshIssues = (shell: ReturnType<typeof createShell>): void => {
   })
 }
 
+const createIssueForSelectedRepository = (shell: ReturnType<typeof createShell>): void => {
+  const selectedOption = shell.issueList.getSelectedOption()
+  if (!selectedOption) {
+    shell.status.content = "Select a repository issue before creating a new issue."
+    return
+  }
+
+  const { repository } = selectedOption.value as IssueOptionValue
+  shell.status.content = `Opening GitHub issue creator for ${repository}…`
+
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const issues = yield* GitHubIssues
+      yield* issues.createInBrowser({ repository })
+    }).pipe(
+      Effect.provide(appLayer),
+      Effect.match({
+        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
+        onSuccess: () => ({ _tag: "Success" as const }),
+      }),
+    ),
+  ).then((result) => {
+    if (result._tag === "Failure") {
+      shell.status.content = "Unable to open issue creator."
+      shell.details.content = result.message
+      return
+    }
+
+    shell.status.content = `Opened GitHub issue creator for ${repository}. Press r to refresh after creating it.`
+  })
+}
+
 const main = async (): Promise<void> => {
   const renderer = await createCliRenderer({ exitOnCtrlC: true })
   const shell = createShell(renderer)
@@ -351,6 +383,10 @@ const main = async (): Promise<void> => {
       return
     }
     if (key.name === "r") refreshIssues(shell)
+    if (key.name === "N" || key.sequence === "N" || key.raw === "N") {
+      key.stopPropagation()
+      createIssueForSelectedRepository(shell)
+    }
   })
 
   refreshIssues(shell)

@@ -1,5 +1,5 @@
 import { Context, Effect, Layer, ParseResult, Schema } from "effect"
-import { CommandError, CommandRunner, CommandRunnerLive, JsonParseError } from "./CommandRunner.js"
+import { CommandError, CommandRunner, CommandRunnerLive, JsonParseError, type CommandResult } from "./CommandRunner.js"
 
 export const GitHubUser = Schema.Struct({
   login: Schema.String,
@@ -20,6 +20,7 @@ export interface GitHubCli {
   readonly ensureAuthenticated: Effect.Effect<void, GitHubCliUnavailable | GitHubCliUnauthenticated>
   readonly login: Effect.Effect<void, CommandError>
   readonly currentUser: Effect.Effect<GitHubUser, GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError>
+  readonly command: (operation: string, args: readonly string[]) => Effect.Effect<CommandResult, GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError>
   readonly apiJson: <S extends Schema.Schema.Any>(
     operation: string,
     schema: S,
@@ -66,6 +67,12 @@ export const GitHubCliLive = Layer.effect(
       Effect.flatMap(() => commands.runSchema(GitHubUser, "gh", ["api", "user"])),
     )
 
+    const command = (operation: string, args: readonly string[]) =>
+      ensureAuthenticated.pipe(
+        Effect.flatMap(() => commands.run("gh", args)),
+        Effect.withSpan(`GitHubCli.${operation}`),
+      )
+
     const apiJson = <S extends Schema.Schema.Any>(operation: string, schema: S, args: readonly string[]) =>
       ensureAuthenticated.pipe(
         Effect.flatMap(() => commands.runSchema(schema, "gh", ["api", ...args])),
@@ -77,6 +84,7 @@ export const GitHubCliLive = Layer.effect(
       ensureAuthenticated,
       login,
       currentUser,
+      command,
       apiJson,
     } as const
   }),
