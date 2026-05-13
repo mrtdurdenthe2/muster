@@ -142,8 +142,8 @@ class IssueDetailsRenderable extends Renderable {
   private message = "Select an issue to see details."
   private expanded = false
   private readonly backgroundColor = parseColor("#0d1117")
-  private readonly barColor = parseColor("#161b22")
-  private readonly panelColor = parseColor("#161b22")
+  private readonly barColor = parseColor("#111820")
+  private readonly panelColor = parseColor("#0f141b")
   private readonly borderColor = parseColor("#30363d")
   private readonly titleColor = parseColor("#f0f6fc")
   private readonly textColor = parseColor("#c9d1d9")
@@ -712,6 +712,8 @@ const loadIssues = Effect.gen(function* () {
 const createShell = (renderer: CliRenderer) => {
   renderer.setBackgroundColor("#0d1117")
 
+  const bodyHeight = Math.max(8, renderer.terminalHeight - 6)
+
   const container = new BoxRenderable(renderer, {
     id: "muster-root",
     width: "auto",
@@ -743,15 +745,17 @@ const createShell = (renderer: CliRenderer) => {
   const body = new BoxRenderable(renderer, {
     id: "body",
     width: "auto",
-    height: Math.max(8, renderer.terminalHeight - 6),
+    height: bodyHeight,
     flexDirection: "row",
+    gap: 1,
+    marginTop: 1,
   })
   container.add(body)
 
   const issueList = new IssueListRenderable(renderer, {
     id: "issue-list",
     width: Math.max(48, Math.floor(renderer.terminalWidth * 0.58)),
-    height: Math.max(8, renderer.terminalHeight - 6),
+    height: bodyHeight,
     onSelectionChange: (option) => {
       details.setOption(option)
     },
@@ -761,7 +765,8 @@ const createShell = (renderer: CliRenderer) => {
   const details = new IssueDetailsRenderable(renderer, {
     id: "details",
     width: "auto",
-    height: Math.max(8, renderer.terminalHeight - 6),
+    height: Math.max(7, bodyHeight - 1),
+    marginTop: 1,
   })
   body.add(details)
 
