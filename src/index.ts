@@ -455,7 +455,7 @@ class IssueCreatorRenderable extends Renderable {
       return true
     }
 
-    if (key.name === "l" || key.sequence === "l" || key.raw === "l") {
+    if (key.ctrl && key.name === "l") {
       this.labelPickerOpen = true
       this.labelSearch = ""
       this.labelSelectedIndex = 0
@@ -527,7 +527,7 @@ class IssueCreatorRenderable extends Renderable {
       this.drawField("title", "Title", this.title, 6, 1)
       this.drawField("body", "Body", this.body || "Optional description", 8, Math.max(3, this.height - 12))
 
-      const help = "Tab switch fields · l labels · Ctrl+S create · Esc cancel"
+      const help = "Tab switch fields · Ctrl+L labels · Ctrl+S create · Esc cancel"
       this.frameBuffer.drawText(help, 2, this.height - 3, this.mutedColor)
       if (this.message) {
         const color = this.message === "Title is required." ? this.errorColor : this.labelColor
