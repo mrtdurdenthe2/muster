@@ -673,19 +673,24 @@ class IssueCreatorRenderable extends Renderable {
   private drawField(field: IssueCreatorField, label: string, value: string, labelY: number, height: number): void {
     const active = this.activeField === field
     const y = labelY + 1
+    const contentWidth = Math.max(0, this.width - 6)
     this.frameBuffer?.drawText(`${label}${active ? " *" : ""}`, 2, labelY, active ? this.activeColor : this.labelColor)
     this.frameBuffer?.fillRect(2, y, this.width - 4, height, parseColor(active ? "#161b22" : "#0d1117"))
 
-    const lines = value.split("\n").slice(0, height)
+    const allLines = value.split("\n")
+    const lineOffset = active ? Math.max(0, allLines.length - height) : 0
+    const lines = allLines.slice(lineOffset, lineOffset + height)
     lines.forEach((line, index) => {
       const color = field === "body" && !this.body ? this.mutedColor : this.textColor
-      this.frameBuffer?.drawText(truncate(line, this.width - 6), 3, y + index, color)
+      const isCursorLine = active && lineOffset + index === allLines.length - 1
+      const visibleLine = isCursorLine ? line.slice(Math.max(0, line.length - contentWidth)) : truncate(line, contentWidth)
+      this.frameBuffer?.drawText(visibleLine, 3, y + index, color)
     })
 
     if (active && !this.submitting) {
       const lastLine = lines.at(-1) ?? ""
       const cursorY = y + Math.min(lines.length - 1, height - 1)
-      const cursorX = Math.min(3 + lastLine.length, this.width - 4)
+      const cursorX = 3 + Math.min(lastLine.length, contentWidth)
       this.frameBuffer?.drawText("_", cursorX, cursorY, this.activeColor)
     }
   }
