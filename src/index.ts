@@ -545,12 +545,12 @@ class IssueCreatorRenderable extends Renderable {
       return true
     }
 
-    if (key.name === "up" || key.name === "k") {
+    if (key.name === "up") {
       this.moveLabelSelection(-1)
       return true
     }
 
-    if (key.name === "down" || key.name === "j") {
+    if (key.name === "down") {
       this.moveLabelSelection(1)
       return true
     }
