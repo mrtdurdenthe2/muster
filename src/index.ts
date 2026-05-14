@@ -765,6 +765,7 @@ const createShell = (renderer: CliRenderer) => {
   const details = new IssueDetailsRenderable(renderer, {
     id: "details",
     width: "auto",
+    flexGrow: 1,
     height: Math.max(7, bodyHeight - 1),
     marginTop: 1,
   })
