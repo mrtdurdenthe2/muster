@@ -772,7 +772,7 @@ const createShell = (renderer: CliRenderer) => {
 
   const footer = new TextRenderable(renderer, {
     id: "footer",
-    content: "↑/↓ or j/k to move · enter to select · N new issue · r to refresh · q to quit",
+    content: "↑/↓ or j/k to move · enter to select · Ctrl+N new issue · r to refresh · q to quit",
     height: 1,
     fg: "#8b949e",
   })
@@ -809,7 +809,7 @@ const expandSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
   shell.issueList.visible = false
   shell.details.width = "100%"
   shell.details.setExpanded(true)
-  shell.footer.content = "Esc collapse issue · N new issue · r to refresh · q to quit"
+  shell.footer.content = "Esc collapse issue · Ctrl+N new issue · r to refresh · q to quit"
   shell.status.content = "Issue expanded."
 }
 
@@ -817,7 +817,7 @@ const collapseSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
   shell.issueList.visible = true
   shell.details.width = "auto"
   shell.details.setExpanded(false)
-  shell.footer.content = "↑/↓ or j/k to move · enter to select · N new issue · r to refresh · q to quit"
+  shell.footer.content = "↑/↓ or j/k to move · enter to select · Ctrl+N new issue · r to refresh · q to quit"
   shell.status.content = "Issue list restored."
   shell.issueList.focus()
 }
@@ -939,7 +939,7 @@ const main = async (): Promise<void> => {
       return
     }
     if (key.name === "r") refreshIssues(shell)
-    if (key.name === "N" || key.sequence === "N" || key.raw === "N") {
+    if (key.ctrl && key.name === "n") {
       key.stopPropagation()
       openIssueCreatorForSelectedRepository(shell)
     }
