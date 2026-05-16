@@ -54,6 +54,8 @@ const uniqueLabels = (labels: ReadonlyArray<string>): ReadonlyArray<string> => {
   return unique
 }
 
+const issueCreationStatusText = (repository: string): string => ` Creating issue in ${repository}... `
+
 const renderAuthHelp = (error: GitHubCliUnavailable | GitHubCliUnauthenticated): string =>
   Match.value(error).pipe(
     Match.tag("GitHubCliUnavailable", () => "GitHub CLI is required. Install it from https://cli.github.com/ and run `gh auth login`."),
@@ -795,9 +797,24 @@ const createShell = (renderer: CliRenderer) => {
   })
   renderer.root.add(issueCreator)
 
+  const createStatus = new TextRenderable(renderer, {
+    id: "create-status",
+    position: "absolute",
+    top: 1,
+    right: 1,
+    width: 1,
+    height: 1,
+    zIndex: 30,
+    content: "",
+    fg: "#dbeafe",
+    bg: "#1f6feb",
+    visible: false,
+  })
+  renderer.root.add(createStatus)
+
   issueList.focus()
 
-  const shell = { status, issueList, details, issueCreator, footer }
+  const shell = { status, issueList, details, issueCreator, createStatus, footer }
   return shell
 }
 
@@ -884,8 +901,13 @@ const openIssueCreatorForSelectedRepository = (shell: ReturnType<typeof createSh
 }
 
 const createIssueFromDraft = (shell: ReturnType<typeof createShell>, draft: IssueDraft): void => {
-  shell.status.content = `Creating issue in ${draft.repository}...`
-  shell.issueCreator.setSubmitting(true)
+  const createMessage = issueCreationStatusText(draft.repository)
+  shell.status.content = "Issue creator closed. Creating issue in the background..."
+  shell.createStatus.content = createMessage
+  shell.createStatus.width = createMessage.length
+  shell.createStatus.visible = true
+  shell.issueCreator.close()
+  shell.issueList.focus()
 
   Effect.runPromise(
     Effect.gen(function* () {
@@ -899,14 +921,14 @@ const createIssueFromDraft = (shell: ReturnType<typeof createShell>, draft: Issu
       }),
     ),
   ).then((result) => {
+    shell.createStatus.visible = false
+
     if (result._tag === "Failure") {
       shell.status.content = "Unable to create issue."
-      shell.issueCreator.setMessage(result.message)
+      shell.details.setMessage(result.message)
       return
     }
 
-    shell.issueCreator.close()
-    shell.issueList.focus()
     shell.status.content = `Created issue in ${draft.repository}. Press r to refresh.`
     shell.details.setMessage(result.result.url)
   })
