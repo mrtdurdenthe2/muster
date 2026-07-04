@@ -2,6 +2,8 @@
 
 TUI for managing your issues across the land of GitHub.
 
+![muster screenshot](./showcase.png)
+
 ## GitHub Access
 
 muster uses the GitHub CLI for authentication so it does not manage or store GitHub tokens directly.
