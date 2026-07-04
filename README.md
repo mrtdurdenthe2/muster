@@ -10,8 +10,11 @@ muster uses the GitHub CLI for authentication so it does not manage or store Git
 
 Requirements:
 
+- Install `bun` from https://bun.sh/. This is currently required to run muster, but it is not expected to be needed later on.
 - Install `gh` from https://cli.github.com/.
 - Authenticate with `gh auth login --hostname github.com --web --scopes repo,read:org`.
+
+This project is still early, so expect bugs and inconsistencies.
 
 Launch the issue list with:
 
