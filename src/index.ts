@@ -13,7 +13,7 @@ import {
 import { Effect, Layer, Match, ParseResult } from "effect"
 import { CommandError, JsonParseError } from "./services/CommandRunner.js"
 import { GitHubCliLive, GitHubCliUnauthenticated, GitHubCliUnavailable } from "./services/GitHubCli.js"
-import { GitHubIssues, GitHubIssuesLive, type GitHubIssue, type GitHubLabel } from "./services/GitHubIssues.js"
+import { GitHubIssues, GitHubIssuesLive, type GitHubIssue, type GitHubLabel, type GitHubRepository } from "./services/GitHubIssues.js"
 
 interface IssueOptionValue {
   readonly issue: GitHubIssue
@@ -36,6 +36,13 @@ interface IssueDraft {
 
 type IssueCreatorField = "title" | "body"
 
+type RepositoryPickerMode = "select" | "third-party"
+
+interface RepositoryCache {
+  readonly repositories: ReadonlyArray<GitHubRepository>
+  readonly fingerprint: string
+}
+
 const appLayer = Layer.merge(GitHubCliLive, GitHubIssuesLive)
 
 const labelKey = (label: string): string => label.trim().toLocaleLowerCase()
@@ -55,6 +62,18 @@ const uniqueLabels = (labels: ReadonlyArray<string>): ReadonlyArray<string> => {
 }
 
 const issueCreationStatusText = (repository: string): string => ` Creating issue in ${repository}... `
+
+const normalizeOwnedRepositories = (repositories: ReadonlyArray<GitHubRepository>): ReadonlyArray<GitHubRepository> =>
+  [...repositories].filter((repository) => !repository.archived).sort((left, right) => right.updated_at.localeCompare(left.updated_at))
+
+const repositoryCacheFingerprint = (repositories: ReadonlyArray<GitHubRepository>): string =>
+  JSON.stringify(
+    repositories.map((repository) => ({
+      full_name: repository.full_name,
+      private: repository.private,
+      updated_at: repository.updated_at,
+    })),
+  )
 
 const renderAuthHelp = (error: GitHubCliUnavailable | GitHubCliUnauthenticated): string =>
   Match.value(error).pipe(
@@ -698,6 +717,285 @@ class IssueCreatorRenderable extends Renderable {
   }
 }
 
+class RepositoryPickerRenderable extends Renderable {
+  protected _focusable = true
+
+  private repositories: ReadonlyArray<GitHubRepository> = []
+  private selectedIndex = 0
+  private scrollOffset = 0
+  private mode: RepositoryPickerMode = "select"
+  private repositoryInput = ""
+  private message = ""
+  private loading = false
+  private spinnerFrame = 0
+  private spinnerTimer: ReturnType<typeof setInterval> | null = null
+  private readonly backgroundColor = parseColor("#0d1117")
+  private readonly panelColor = parseColor("#161b22")
+  private readonly borderColor = parseColor("#30363d")
+  private readonly titleColor = parseColor("#58a6ff")
+  private readonly textColor = parseColor("#c9d1d9")
+  private readonly mutedColor = parseColor("#8b949e")
+  private readonly activeColor = parseColor("#1f6feb")
+  private readonly errorColor = parseColor("#f85149")
+  private readonly onSelect: (repository: string) => void
+  private readonly onCancel: () => void
+
+  constructor(
+    ctx: CliRenderer,
+    options: RenderableOptions<RepositoryPickerRenderable> & {
+      onSelect: (repository: string) => void
+      onCancel: () => void
+    },
+  ) {
+    super(ctx, { ...options, buffered: true, visible: false })
+    this.onSelect = options.onSelect
+    this.onCancel = options.onCancel
+  }
+
+  public openLoading(): void {
+    this.repositories = []
+    this.selectedIndex = 0
+    this.scrollOffset = 0
+    this.mode = "select"
+    this.repositoryInput = ""
+    this.message = "Loading owned repositories..."
+    this.loading = true
+    this.visible = true
+    this.startSpinner()
+    this.focus()
+    this.requestRender()
+  }
+
+  public openWithRepositories(repositories: ReadonlyArray<GitHubRepository>, message = ""): void {
+    this.mode = "select"
+    this.repositoryInput = ""
+    this.visible = true
+    this.focus()
+    this.setRepositories(repositories, message)
+  }
+
+  public close(): void {
+    this.visible = false
+    this.stopSpinner()
+    this.requestRender()
+  }
+
+  public setRepositories(repositories: ReadonlyArray<GitHubRepository>, message?: string): void {
+    this.repositories = normalizeOwnedRepositories(repositories)
+    this.selectedIndex = 0
+    this.scrollOffset = 0
+    this.loading = false
+    this.stopSpinner()
+    this.message = message ?? (this.repositories.length === 0 ? "No owned repositories found." : "")
+    this.requestRender()
+  }
+
+  public setMessage(message: string): void {
+    this.loading = false
+    this.stopSpinner()
+    this.message = message
+    this.requestRender()
+  }
+
+  public handleKeyPress(key: KeyEvent): boolean {
+    if (!this.visible) return false
+
+    if (key.name === "escape") {
+      if (this.mode === "third-party") {
+        this.mode = "select"
+        this.message = ""
+        this.requestRender()
+        return true
+      }
+
+      this.close()
+      this.onCancel()
+      return true
+    }
+
+    if (this.mode === "third-party") return this.handleRepositoryInputKeyPress(key)
+    if (this.loading) return true
+
+    if (key.name === "up" || key.name === "k") {
+      this.moveSelection(-1)
+      return true
+    }
+
+    if (key.name === "down" || key.name === "j") {
+      this.moveSelection(1)
+      return true
+    }
+
+    if (key.name === "return" || key.name === "linefeed") {
+      this.chooseSelectedOption()
+      return true
+    }
+
+    return true
+  }
+
+  protected renderSelf(buffer: OptimizedBuffer, _deltaTime: number): void {
+    if (!this.visible || !this.frameBuffer) return
+
+    if (this.isDirty) {
+      this.frameBuffer.clear(this.backgroundColor)
+      this.drawBox()
+      this.frameBuffer.fillRect(1, 1, Math.max(0, this.width - 2), Math.max(0, this.height - 2), this.panelColor)
+      this.frameBuffer.drawText(" Make Issue in Other Repo ", 2, 0, this.titleColor)
+
+      if (this.loading) {
+        this.drawLoadingSpinner()
+        return
+      }
+
+      if (this.mode === "third-party") {
+        this.drawRepositoryInput()
+        return
+      }
+
+      const help = "Enter choose - Esc cancel"
+      this.frameBuffer.drawText(help, 2, this.height - 3, this.mutedColor)
+      if (this.message) {
+        const color = this.message.startsWith("Unable") ? this.errorColor : this.mutedColor
+        this.frameBuffer.drawText(truncate(this.message, this.width - 4), 2, this.height - 2, color)
+      }
+
+      const options = this.repositoryOptions()
+      const listTop = 2
+      const listHeight = Math.max(0, this.height - 6)
+      this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, options.length - 1))
+      this.updateScrollOffset(listHeight)
+
+      options.slice(this.scrollOffset, this.scrollOffset + listHeight).forEach((option, index) => {
+        const optionIndex = this.scrollOffset + index
+        const selected = optionIndex === this.selectedIndex
+        const y = listTop + index
+        if (selected) this.frameBuffer?.fillRect(2, y, this.width - 4, 1, this.activeColor)
+        this.frameBuffer?.drawText(truncate(`${selected ? ">" : " "} ${option.name}`, this.width - 6), 3, y, selected ? parseColor("#ffffff") : this.textColor)
+      })
+    }
+  }
+
+  private handleRepositoryInputKeyPress(key: KeyEvent): boolean {
+    if (key.name === "return" || key.name === "linefeed") {
+      const repository = this.repositoryInput.trim()
+      if (!/^[^/\s]+\/[^/\s]+$/.test(repository)) {
+        this.message = "Use the format owner/name."
+        this.requestRender()
+        return true
+      }
+
+      this.onSelect(repository)
+      return true
+    }
+
+    if (key.name === "backspace") {
+      this.repositoryInput = this.repositoryInput.slice(0, -1)
+      this.message = ""
+      this.requestRender()
+      return true
+    }
+
+    if (key.name === "space") return true
+
+    if (!key.ctrl && !key.meta && key.raw.length > 0 && !key.raw.includes("\x1b")) {
+      this.repositoryInput += key.raw.replace(/[\r\n\s]/g, "")
+      this.message = ""
+      this.requestRender()
+      return true
+    }
+
+    return true
+  }
+
+  private chooseSelectedOption(): void {
+    if (this.selectedIndex === 0) {
+      this.mode = "third-party"
+      this.repositoryInput = ""
+      this.message = ""
+      this.requestRender()
+      return
+    }
+
+    const repository = this.repositories[this.selectedIndex - 1]
+    if (repository) this.onSelect(repository.full_name)
+  }
+
+  private moveSelection(delta: number): void {
+    const options = this.repositoryOptions()
+    if (options.length === 0) return
+
+    this.selectedIndex = Math.max(0, Math.min(this.selectedIndex + delta, options.length - 1))
+    this.requestRender()
+  }
+
+  private repositoryOptions(): ReadonlyArray<{ readonly name: string }> {
+    return [
+      { name: "Third-party repository..." },
+      ...this.repositories.map((repository) => ({
+        name: `${repository.full_name}${repository.private ? " (private)" : ""}`,
+      })),
+    ]
+  }
+
+  private updateScrollOffset(listHeight: number): void {
+    if (this.selectedIndex < this.scrollOffset) {
+      this.scrollOffset = this.selectedIndex
+    } else if (this.selectedIndex >= this.scrollOffset + listHeight) {
+      this.scrollOffset = this.selectedIndex - listHeight + 1
+    }
+  }
+
+  private startSpinner(): void {
+    this.stopSpinner()
+    this.spinnerFrame = 0
+    this.spinnerTimer = setInterval(() => {
+      if (!this.visible || !this.loading) {
+        this.stopSpinner()
+        return
+      }
+
+      this.spinnerFrame = (this.spinnerFrame + 1) % 10
+      this.requestRender()
+    }, 120)
+  }
+
+  private stopSpinner(): void {
+    if (this.spinnerTimer) {
+      clearInterval(this.spinnerTimer)
+      this.spinnerTimer = null
+    }
+  }
+
+  private drawLoadingSpinner(): void {
+    const frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
+    const text = `${frames[this.spinnerFrame]} Loading repositories...`
+    const x = Math.max(2, Math.floor((this.width - text.length) / 2))
+    const y = Math.max(2, Math.floor(this.height / 2))
+    this.frameBuffer?.drawText(text, x, y, this.titleColor)
+  }
+
+  private drawRepositoryInput(): void {
+    this.frameBuffer?.drawText("Repository", 2, 2, this.titleColor)
+    this.frameBuffer?.fillRect(2, 4, this.width - 4, 1, this.backgroundColor)
+    this.frameBuffer?.drawText(truncate(`${this.repositoryInput}_`, this.width - 6), 3, 4, this.textColor)
+    this.frameBuffer?.drawText("Enter owner/name - Esc back", 2, this.height - 3, this.mutedColor)
+    if (this.message) {
+      const color = this.message.startsWith("Use") ? this.errorColor : this.mutedColor
+      this.frameBuffer?.drawText(truncate(this.message, this.width - 4), 2, this.height - 2, color)
+    }
+  }
+
+  private drawBox(): void {
+    this.frameBuffer?.fillRect(0, 0, this.width, 1, this.borderColor)
+    this.frameBuffer?.fillRect(0, this.height - 1, this.width, 1, this.borderColor)
+    for (let y = 1; y < this.height - 1; y++) {
+      this.frameBuffer?.drawText("|", 0, y, this.borderColor)
+      this.frameBuffer?.drawText("|", this.width - 1, y, this.borderColor)
+    }
+  }
+}
+
 const loadIssues = Effect.gen(function* () {
   const issues = yield* GitHubIssues
   const response = yield* issues.searchAssigned({ limit: 50 })
@@ -780,7 +1078,7 @@ const createShell = (renderer: CliRenderer) => {
 
   const footer = new TextRenderable(renderer, {
     id: "footer",
-    content: "↑/↓ or j/k to move · enter to select · Ctrl+N new issue · r to refresh · q to quit",
+    content: "↑/↓ or j/k to move · enter to select · Ctrl+N new issue · Ctrl+O other repo · r to refresh · q to quit",
     height: 1,
     fg: "#8b949e",
   })
@@ -802,6 +1100,25 @@ const createShell = (renderer: CliRenderer) => {
   })
   renderer.root.add(issueCreator)
 
+  const repositoryPicker = new RepositoryPickerRenderable(renderer, {
+    id: "repository-picker",
+    position: "absolute",
+    left: Math.max(2, Math.floor((renderer.terminalWidth - Math.min(70, renderer.terminalWidth - 4)) / 2)),
+    top: Math.max(2, Math.floor((renderer.terminalHeight - Math.min(18, renderer.terminalHeight - 4)) / 2)),
+    width: Math.min(70, renderer.terminalWidth - 4),
+    height: Math.min(18, renderer.terminalHeight - 4),
+    zIndex: 25,
+    onSelect: (repository) => {
+      repositoryPicker.close()
+      openIssueCreatorForRepository(shell, repository)
+    },
+    onCancel: () => {
+      status.content = "Repository selection cancelled."
+      issueList.focus()
+    },
+  })
+  renderer.root.add(repositoryPicker)
+
   const createStatus = new TextRenderable(renderer, {
     id: "create-status",
     position: "absolute",
@@ -819,7 +1136,17 @@ const createShell = (renderer: CliRenderer) => {
 
   issueList.focus()
 
-  const shell = { status, issueList, details, issueCreator, createStatus, footer }
+  const shell = {
+    status,
+    issueList,
+    details,
+    issueCreator,
+    repositoryPicker,
+    createStatus,
+    footer,
+    repositoryCache: null as RepositoryCache | null,
+    repositoryRefreshInFlight: false,
+  }
   return shell
 }
 
@@ -832,7 +1159,7 @@ const expandSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
   shell.issueList.visible = false
   shell.details.width = "100%"
   shell.details.setExpanded(true)
-  shell.footer.content = "Esc collapse issue · Ctrl+N new issue · r to refresh · q to quit"
+  shell.footer.content = "Esc collapse issue · Ctrl+N new issue · Ctrl+O other repo · r to refresh · q to quit"
   shell.status.content = "Issue expanded."
 }
 
@@ -840,7 +1167,7 @@ const collapseSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
   shell.issueList.visible = true
   shell.details.width = "auto"
   shell.details.setExpanded(false)
-  shell.footer.content = "↑/↓ or j/k to move · enter to select · Ctrl+N new issue · r to refresh · q to quit"
+  shell.footer.content = "↑/↓ or j/k to move · enter to select · Ctrl+N new issue · Ctrl+O other repo · r to refresh · q to quit"
   shell.status.content = "Issue list restored."
   shell.issueList.focus()
 }
@@ -878,6 +1205,10 @@ const openIssueCreatorForSelectedRepository = (shell: ReturnType<typeof createSh
   }
 
   const { repository } = selectedOption.value as IssueOptionValue
+  openIssueCreatorForRepository(shell, repository)
+}
+
+const openIssueCreatorForRepository = (shell: ReturnType<typeof createShell>, repository: string): void => {
   shell.status.content = `Creating a new issue in ${repository}.`
   shell.issueCreator.open(repository)
   shell.issueCreator.setMessage("Loading labels...")
@@ -902,6 +1233,66 @@ const openIssueCreatorForSelectedRepository = (shell: ReturnType<typeof createSh
     }
 
     shell.issueCreator.setAvailableLabels(result.labels)
+  })
+}
+
+const openRepositoryPicker = (shell: ReturnType<typeof createShell>): void => {
+  if (shell.repositoryCache) {
+    shell.status.content = "Showing cached repositories. Refreshing in the background."
+    shell.repositoryPicker.openWithRepositories(shell.repositoryCache.repositories, "Refreshing repositories...")
+  } else {
+    shell.status.content = "Loading owned repositories."
+    shell.repositoryPicker.openLoading()
+  }
+
+  refreshOwnedRepositories(shell)
+}
+
+const refreshOwnedRepositories = (shell: ReturnType<typeof createShell>): void => {
+  if (shell.repositoryRefreshInFlight) return
+
+  shell.repositoryRefreshInFlight = true
+
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const issues = yield* GitHubIssues
+      return yield* issues.listOwnedRepositories()
+    }).pipe(
+      Effect.provide(appLayer),
+      Effect.match({
+        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
+        onSuccess: (repositories) => ({ _tag: "Success" as const, repositories }),
+      }),
+    ),
+  ).then((result) => {
+    shell.repositoryRefreshInFlight = false
+
+    if (result._tag === "Failure") {
+      if (!shell.repositoryPicker.visible) return
+
+      if (shell.repositoryCache) {
+        shell.status.content = "Showing cached repositories. Background refresh failed."
+        shell.repositoryPicker.setMessage(`Unable to refresh repositories: ${result.message}`)
+      } else {
+        shell.status.content = "Unable to load owned repositories."
+        shell.repositoryPicker.setMessage(`Unable to load repositories: ${result.message}`)
+      }
+      return
+    }
+
+    const repositories = normalizeOwnedRepositories(result.repositories)
+    const fingerprint = repositoryCacheFingerprint(repositories)
+    const changed = shell.repositoryCache?.fingerprint !== fingerprint
+    shell.repositoryCache = { repositories, fingerprint }
+
+    if (!shell.repositoryPicker.visible) return
+
+    shell.status.content = "Choose a repository for the new issue."
+    if (changed) {
+      shell.repositoryPicker.setRepositories(repositories)
+    } else {
+      shell.repositoryPicker.setMessage("")
+    }
   })
 }
 
@@ -944,6 +1335,12 @@ const main = async (): Promise<void> => {
   const shell = createShell(renderer)
 
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
+    if (shell.repositoryPicker.visible) {
+      key.stopPropagation()
+      shell.repositoryPicker.handleKeyPress(key)
+      return
+    }
+
     if (shell.issueCreator.visible) {
       key.stopPropagation()
       shell.issueCreator.handleKeyPress(key)
@@ -970,6 +1367,10 @@ const main = async (): Promise<void> => {
     if (key.ctrl && key.name === "n") {
       key.stopPropagation()
       openIssueCreatorForSelectedRepository(shell)
+    }
+    if (key.ctrl && key.name === "o") {
+      key.stopPropagation()
+      openRepositoryPicker(shell)
     }
   })
 

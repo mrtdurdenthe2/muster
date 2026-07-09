@@ -30,6 +30,16 @@ export const GitHubLabel = Schema.Struct({
 
 export type GitHubLabel = typeof GitHubLabel.Type
 
+export const GitHubRepository = Schema.Struct({
+  full_name: Schema.String,
+  private: Schema.Boolean,
+  archived: Schema.Boolean,
+  updated_at: Schema.String,
+  description: Schema.optionalWith(Schema.Union(Schema.String, Schema.Null), { default: () => null }),
+})
+
+export type GitHubRepository = typeof GitHubRepository.Type
+
 export const IssueSearchResponse = Schema.Struct({
   total_count: Schema.Number,
   incomplete_results: Schema.Boolean,
@@ -69,6 +79,10 @@ export interface GitHubIssues {
     ReadonlyArray<GitHubLabel>,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
   >
+  readonly listOwnedRepositories: () => Effect.Effect<
+    ReadonlyArray<GitHubRepository>,
+    GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
+  >
   readonly create: (options: IssueCreateOptions) => Effect.Effect<
     IssueCreateResult,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
@@ -90,6 +104,19 @@ export const GitHubIssuesLive = Layer.effect(
 
     const listLabels = (repository: string) =>
       github.apiJson("listRepositoryLabels", Schema.Array(GitHubLabel), ["--method", "GET", `repos/${repository}/labels`, "-F", "per_page=100"])
+
+    const listOwnedRepositories = () =>
+      github.apiJson("listOwnedRepositories", Schema.Array(GitHubRepository), [
+        "--method",
+        "GET",
+        "user/repos",
+        "-f",
+        "affiliation=owner",
+        "-f",
+        "sort=updated",
+        "-F",
+        "per_page=100",
+      ])
 
     const createLabel = (repository: string, name: string) =>
       github.command("createLabel", ["label", "create", name, "--repo", repository, "--color", "ededed", "--description", "Created from muster"]).pipe(
@@ -130,6 +157,7 @@ export const GitHubIssuesLive = Layer.effect(
       searchAssigned,
       listAssigned,
       listLabels,
+      listOwnedRepositories,
       create,
       repositoryNameFromApiUrl,
     } as const
