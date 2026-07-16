@@ -1,3 +1,5 @@
+#!/usr/bin/env bun
+
 import {
   BoxRenderable,
   createCliRenderer,
@@ -14,7 +16,14 @@ import {
 import { Effect, Layer, Match, ParseResult } from "effect"
 import { CommandError, JsonParseError } from "./services/CommandRunner.js"
 import { GitHubCliLive, GitHubCliUnauthenticated, GitHubCliUnavailable } from "./services/GitHubCli.js"
-import { GitHubIssues, GitHubIssuesLive, type GitHubIssue, type GitHubLabel, type GitHubRepository } from "./services/GitHubIssues.js"
+import {
+  GitHubIssues,
+  GitHubIssuesLive,
+  type GitHubIssue,
+  type GitHubIssueComment,
+  type GitHubLabel,
+  type GitHubRepository,
+} from "./services/GitHubIssues.js"
 
 interface IssueOptionValue {
   readonly issue: GitHubIssue
@@ -49,6 +58,12 @@ interface RepositoryPickerOption {
   readonly name: string
   readonly repository?: string
 }
+
+type CommentState =
+  | { readonly _tag: "Idle" }
+  | { readonly _tag: "Loading" }
+  | { readonly _tag: "Loaded"; readonly comments: ReadonlyArray<GitHubIssueComment> }
+  | { readonly _tag: "Error"; readonly message: string }
 
 const appLayer = Layer.merge(GitHubCliLive, GitHubIssuesLive)
 
@@ -184,8 +199,15 @@ const issueToOption = (issue: GitHubIssue, issues: GitHubIssues): SelectOption =
   }
 }
 
+const issueOptionKey = (option: SelectOption): string => {
+  const value = option.value as IssueOptionValue
+  return `${value.repository}#${value.issue.number}`
+}
+
 class IssueDetailsRenderable extends Renderable {
   private option: SelectOption | null = null
+  private optionKey: string | null = null
+  private commentState: CommentState = { _tag: "Idle" }
   private message = "Select an issue to see details."
   private expanded = false
   private readonly backgroundColor = parseColor(theme.background)
@@ -202,19 +224,43 @@ class IssueDetailsRenderable extends Renderable {
   }
 
   public setOption(option: SelectOption | null): void {
+    const nextKey = option ? issueOptionKey(option) : null
+    if (nextKey !== this.optionKey) this.commentState = { _tag: "Idle" }
+
     this.option = option
+    this.optionKey = nextKey
     this.message = option ? "" : "No issue selected."
     this.requestRender()
   }
 
   public setMessage(message: string): void {
     this.option = null
+    this.optionKey = null
+    this.commentState = { _tag: "Idle" }
     this.message = message
     this.requestRender()
   }
 
   public setExpanded(expanded: boolean): void {
     this.expanded = expanded
+    this.requestRender()
+  }
+
+  public setCommentsLoading(key: string): void {
+    if (key !== this.optionKey) return
+    this.commentState = { _tag: "Loading" }
+    this.requestRender()
+  }
+
+  public setComments(key: string, comments: ReadonlyArray<GitHubIssueComment>): void {
+    if (key !== this.optionKey) return
+    this.commentState = { _tag: "Loaded", comments }
+    this.requestRender()
+  }
+
+  public setCommentsError(key: string, message: string): void {
+    if (key !== this.optionKey) return
+    this.commentState = { _tag: "Error", message }
     this.requestRender()
   }
 
@@ -257,21 +303,56 @@ class IssueDetailsRenderable extends Renderable {
       const contentWidth = Math.max(0, this.width - 4)
       const contentHeight = Math.max(0, this.height - 5)
       const body = value.issue.body?.trim() || "No description provided."
+      const commentLines = this.commentTreeLines(contentWidth)
+      const availableContentHeight = Math.max(0, contentHeight - 5)
+      const commentHeight = Math.min(commentLines.length, Math.max(2, Math.ceil(availableContentHeight * 0.6)))
+      const bodyHeight = Math.max(1, availableContentHeight - commentHeight - 1)
       const detailLines = [
         `Author: ${value.issue.user.login}`,
         `State: ${value.issue.state}`,
         `Updated: ${formatDate(value.issue.updated_at)}`,
         value.issue.html_url,
         "",
-        ...limitedWrappedText(body, contentWidth, Math.max(0, contentHeight - 5)),
+        ...limitedWrappedText(body, contentWidth, bodyHeight),
+        "",
+        ...commentLines,
       ]
 
       detailLines.slice(0, contentHeight).forEach((line, index) => {
         const y = index + 4
-        const color = line === value.issue.html_url ? this.linkColor : line === "" ? this.mutedColor : this.textColor
+        const color =
+          line === value.issue.html_url || line === "Comments"
+            ? this.linkColor
+            : line.startsWith("├─") || line.startsWith("└─")
+              ? this.titleColor
+              : line === "" || line.includes("Loading comments") || line.includes("No comments") || line.includes("Unable to load")
+                ? this.mutedColor
+                : this.textColor
         this.frameBuffer?.drawText(truncate(line, contentWidth), 2, y, color)
       })
     }
+  }
+
+  private commentTreeLines(width: number): ReadonlyArray<string> {
+    if (this.commentState._tag === "Idle" || this.commentState._tag === "Loading") {
+      return ["Comments", "└─ Loading comments..."]
+    }
+    if (this.commentState._tag === "Error") {
+      return ["Comments", `└─ Unable to load comments: ${this.commentState.message}`]
+    }
+    const comments = this.commentState.comments
+    if (comments.length === 0) {
+      return ["Comments", "└─ No comments"]
+    }
+
+    return comments.flatMap((comment, index) => {
+      const last = index === comments.length - 1
+      const branch = last ? "└─" : "├─"
+      const continuation = last ? "  " : "│ "
+      const body = comment.body?.trim() || "No comment text."
+      const bodyLines = wrapText(body, Math.max(1, width - 3)).map((line) => `${continuation} ${line}`)
+      return [`${branch} @${comment.user.login} · ${formatDate(comment.created_at)}`, ...bodyLines]
+    })
   }
 }
 
@@ -1132,6 +1213,7 @@ const createShell = (renderer: CliRenderer) => {
     height: compactLayout ? compactListHeight : bodyHeight,
     onSelectionChange: (option) => {
       details.setOption(option)
+      if (option) loadIssueComments(shell, option)
     },
   })
   body.add(issueList)
@@ -1285,6 +1367,8 @@ const createShell = (renderer: CliRenderer) => {
     footer,
     repositoryCache: null as RepositoryCache | null,
     repositoryRefreshInFlight: false,
+    commentCache: new Map<string, ReadonlyArray<GitHubIssueComment>>(),
+    commentRequests: new Set<string>(),
     updateLayout,
   }
   return shell
@@ -1312,6 +1396,42 @@ const collapseSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
   shell.footer.content = "↑/↓ or j/k to move · enter to select · Ctrl+N Create issue in this repo · Ctrl+O Create issue in other repo · r to refresh · q to quit"
   shell.status.content = "Issue list restored."
   shell.issueList.focus()
+}
+
+const loadIssueComments = (shell: ReturnType<typeof createShell>, option: SelectOption): void => {
+  const key = issueOptionKey(option)
+  const cached = shell.commentCache.get(key)
+  if (cached) {
+    shell.details.setComments(key, cached)
+    return
+  }
+
+  shell.details.setCommentsLoading(key)
+  if (shell.commentRequests.has(key)) return
+
+  const value = option.value as IssueOptionValue
+  shell.commentRequests.add(key)
+  Effect.runPromise(
+    Effect.gen(function* () {
+      const issues = yield* GitHubIssues
+      return yield* issues.listComments(value.repository, value.issue.number)
+    }).pipe(
+      Effect.provide(appLayer),
+      Effect.match({
+        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
+        onSuccess: (comments) => ({ _tag: "Success" as const, comments }),
+      }),
+    ),
+  ).then((result) => {
+    shell.commentRequests.delete(key)
+    if (result._tag === "Failure") {
+      shell.details.setCommentsError(key, result.message)
+      return
+    }
+
+    shell.commentCache.set(key, result.comments)
+    shell.details.setComments(key, result.comments)
+  })
 }
 
 const refreshIssues = (shell: ReturnType<typeof createShell>): void => {

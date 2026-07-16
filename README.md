@@ -16,11 +16,18 @@ Requirements:
 
 This project is still early, so expect bugs and inconsistencies.
 
-Launch the issue list with:
+Install the `muster` command from this checkout:
 
 ```sh
-bun run start
+npm link
+muster
 ```
+
+You can also launch it without linking by running `bun run start`.
+
+## Acknowledgments
+
+The GitHub CLI authentication approach is based on Kit Langton's [`ghui`](https://github.com/kitlangton/ghui) GitHub authentication module.
 
 ## Local Reference Repositories
 

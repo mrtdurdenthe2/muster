@@ -4,6 +4,9 @@
   "description": "TUI for managing your issues across the land of GitHub.",
   "type": "module",
   "private": true,
+  "bin": {
+    "muster": "./src/index.ts"
+  },
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch src/index.ts",
