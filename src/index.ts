@@ -4,6 +4,7 @@ import {
   OptimizedBuffer,
   parseColor,
   Renderable,
+  RGBA,
   TextRenderable,
   type CliRenderer,
   type KeyEvent,
@@ -43,7 +44,32 @@ interface RepositoryCache {
   readonly fingerprint: string
 }
 
+interface RepositoryPickerOption {
+  readonly kind: "third-party" | "separator" | "repository"
+  readonly name: string
+  readonly repository?: string
+}
+
 const appLayer = Layer.merge(GitHubCliLive, GitHubIssuesLive)
+
+const issueListMinWidth = 36
+const issueDetailsMinWidth = 32
+const horizontalLayoutMinWidth = issueListMinWidth + issueDetailsMinWidth + 3
+
+const theme = {
+  background: "#111111",
+  surface: "#171717",
+  surfaceRaised: "#1d1d1d",
+  surfaceSelected: "#202a3a",
+  border: "#2b2b2b",
+  text: "#f4f4f5",
+  textMuted: "#8b8b90",
+  textSubtle: "#68686d",
+  blue: "#1683ff",
+  blueText: "#69aaff",
+  blueMuted: "#bad8ff",
+  error: "#f85149",
+} as const
 
 const labelKey = (label: string): string => label.trim().toLocaleLowerCase()
 
@@ -104,15 +130,15 @@ const formatDate = (value: string): string => {
   return date.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
-const labelBackgroundColor = (color: string): string => (/^[0-9a-f]{6}$/i.test(color) ? `#${color}` : "#30363d")
+const labelBackgroundColor = (color: string): string => (/^[0-9a-f]{6}$/i.test(color) ? `#${color}` : theme.border)
 
 const labelTextColor = (color: string): string => {
-  if (!/^[0-9a-f]{6}$/i.test(color)) return "#c9d1d9"
+  if (!/^[0-9a-f]{6}$/i.test(color)) return theme.text
 
   const red = Number.parseInt(color.slice(0, 2), 16)
   const green = Number.parseInt(color.slice(2, 4), 16)
   const blue = Number.parseInt(color.slice(4, 6), 16)
-  return red * 0.299 + green * 0.587 + blue * 0.114 > 150 ? "#0d1117" : "#ffffff"
+  return red * 0.299 + green * 0.587 + blue * 0.114 > 150 ? "#000000" : "#ffffff"
 }
 
 const wrapText = (value: string, width: number): ReadonlyArray<string> => {
@@ -162,14 +188,14 @@ class IssueDetailsRenderable extends Renderable {
   private option: SelectOption | null = null
   private message = "Select an issue to see details."
   private expanded = false
-  private readonly backgroundColor = parseColor("#0d1117")
-  private readonly barColor = parseColor("#111820")
-  private readonly panelColor = parseColor("#0f141b")
-  private readonly borderColor = parseColor("#30363d")
-  private readonly titleColor = parseColor("#f0f6fc")
-  private readonly textColor = parseColor("#c9d1d9")
-  private readonly mutedColor = parseColor("#8b949e")
-  private readonly linkColor = parseColor("#58a6ff")
+  private readonly backgroundColor = parseColor(theme.background)
+  private readonly barColor = parseColor(theme.surface)
+  private readonly panelColor = parseColor(theme.background)
+  private readonly borderColor = parseColor(theme.background)
+  private readonly titleColor = parseColor(theme.text)
+  private readonly textColor = parseColor(theme.text)
+  private readonly mutedColor = parseColor(theme.textMuted)
+  private readonly linkColor = parseColor(theme.blueText)
 
   constructor(ctx: CliRenderer, options: RenderableOptions<IssueDetailsRenderable>) {
     super(ctx, { ...options, buffered: true })
@@ -272,14 +298,16 @@ class IssueListRenderable extends Renderable {
   private rows: ReadonlyArray<IssueListRow> = []
   private selectedIndex = 0
   private scrollOffset = 0
-  private readonly backgroundColor = parseColor("#161b22")
-  private readonly headerBackgroundColor = parseColor("#0d1117")
-  private readonly headerTextColor = parseColor("#8b949e")
-  private readonly textColor = parseColor("#c9d1d9")
-  private readonly selectedBackgroundColor = parseColor("#1f6feb")
-  private readonly selectedTextColor = parseColor("#ffffff")
-  private readonly descriptionColor = parseColor("#8b949e")
-  private readonly selectedDescriptionColor = parseColor("#dbeafe")
+  private readonly backgroundColor = parseColor(theme.surface)
+  private readonly headerBackgroundColor = parseColor(theme.background)
+  private readonly headerTextColor = parseColor(theme.textMuted)
+  private readonly textColor = parseColor(theme.text)
+  private readonly selectedBackgroundColor = parseColor(theme.surfaceSelected)
+  private readonly selectedTextColor = parseColor(theme.blueText)
+  private readonly descriptionColor = parseColor(theme.textMuted)
+  private readonly selectedDescriptionColor = parseColor(theme.blueMuted)
+  private readonly borderColor = parseColor(theme.background)
+  private readonly selectedColor = parseColor(theme.blue)
   private readonly onSelectionChange: (option: SelectOption | null) => void
 
   constructor(
@@ -323,6 +351,7 @@ class IssueListRenderable extends Renderable {
 
     if (this.isDirty) {
       this.frameBuffer.clear(this.backgroundColor)
+      this.frameBuffer.fillRect(Math.max(0, this.width - 1), 0, 1, this.height, this.borderColor)
       let y = -this.scrollOffset
 
       for (const row of this.rows) {
@@ -335,8 +364,8 @@ class IssueListRenderable extends Renderable {
 
         if (row.kind === "header") {
           if (y >= 0) {
-            this.frameBuffer.fillRect(0, y, this.width, 1, this.headerBackgroundColor)
-            this.frameBuffer.drawText(` ${row.repository?.toUpperCase() ?? ""}`, 0, y, this.headerTextColor)
+            this.frameBuffer.fillRect(0, y, Math.max(0, this.width - 1), 1, this.headerBackgroundColor)
+            this.frameBuffer.drawText(`  ${row.repository?.toUpperCase() ?? ""}`, 0, y, this.headerTextColor)
           }
         } else if (row.option && row.optionIndex !== undefined) {
           const selected = row.optionIndex === this.selectedIndex
@@ -344,8 +373,9 @@ class IssueListRenderable extends Renderable {
           const titleColor = selected ? this.selectedTextColor : this.textColor
           const descriptionColor = selected ? this.selectedDescriptionColor : this.descriptionColor
           if (y >= 0) {
-            this.frameBuffer.fillRect(0, y, this.width, Math.min(2, this.height - y), bgColor)
-            this.frameBuffer.drawText(`${selected ? "▶" : " "} ${row.option.name}`, 1, y, titleColor)
+            this.frameBuffer.fillRect(0, y, Math.max(0, this.width - 1), Math.min(2, this.height - y), bgColor)
+            if (selected) this.frameBuffer.fillRect(0, y, 1, Math.min(2, this.height - y), this.selectedColor)
+            this.frameBuffer.drawText(`  ${row.option.name}`, 1, y, titleColor)
           }
           if (y + 1 >= 0 && y + 1 < this.height) {
             this.frameBuffer.drawText(`  ${row.option.description}`, 1, y + 1, descriptionColor)
@@ -398,16 +428,17 @@ class IssueCreatorRenderable extends Renderable {
   private labelPickerOpen = false
   private labelSearch = ""
   private labelSelectedIndex = 0
+  private labelScrollOffset = 0
   private message = ""
   private submitting = false
-  private readonly backgroundColor = parseColor("#0d1117")
-  private readonly borderColor = parseColor("#30363d")
-  private readonly titleColor = parseColor("#58a6ff")
-  private readonly labelColor = parseColor("#8b949e")
-  private readonly textColor = parseColor("#c9d1d9")
-  private readonly mutedColor = parseColor("#6e7681")
-  private readonly activeColor = parseColor("#1f6feb")
-  private readonly errorColor = parseColor("#f85149")
+  private readonly backgroundColor = parseColor(theme.background)
+  private readonly panelColor = parseColor(theme.surface)
+  private readonly titleColor = parseColor(theme.text)
+  private readonly labelColor = parseColor(theme.textMuted)
+  private readonly textColor = parseColor(theme.text)
+  private readonly mutedColor = parseColor(theme.textSubtle)
+  private readonly activeColor = parseColor(theme.blue)
+  private readonly errorColor = parseColor(theme.error)
   private readonly onSubmit: (draft: IssueDraft) => void
   private readonly onCancel: () => void
 
@@ -433,6 +464,7 @@ class IssueCreatorRenderable extends Renderable {
     this.labelPickerOpen = false
     this.labelSearch = ""
     this.labelSelectedIndex = 0
+    this.labelScrollOffset = 0
     this.message = ""
     this.submitting = false
     this.visible = true
@@ -454,6 +486,7 @@ class IssueCreatorRenderable extends Renderable {
   public setAvailableLabels(labels: ReadonlyArray<GitHubLabel>): void {
     this.availableLabels = [...labels].sort((left, right) => left.name.localeCompare(right.name))
     this.labelSelectedIndex = 0
+    this.labelScrollOffset = 0
     this.message = this.message === "Loading labels..." ? "" : this.message
     this.requestRender()
   }
@@ -480,6 +513,7 @@ class IssueCreatorRenderable extends Renderable {
       this.labelPickerOpen = true
       this.labelSearch = ""
       this.labelSelectedIndex = 0
+      this.labelScrollOffset = 0
       this.message = ""
       this.requestRender()
       return true
@@ -540,19 +574,18 @@ class IssueCreatorRenderable extends Renderable {
     if (!this.visible || !this.frameBuffer) return
 
     if (this.isDirty) {
-      this.frameBuffer.clear(this.backgroundColor)
-      this.drawBox()
-      this.frameBuffer.drawText(" New GitHub Issue ", 2, 0, this.titleColor)
-      this.frameBuffer.drawText(`Repository: ${this.repository}`, 2, 2, this.labelColor)
-      this.drawSelectedLabels(4)
-      this.drawField("title", "Title", this.title, 6, 1)
-      this.drawField("body", "Body", this.body || "Optional description", 8, Math.max(3, this.height - 12))
+      this.frameBuffer.clear(this.panelColor)
+      this.frameBuffer.drawText(" New GitHub Issue ", 2, 1, this.titleColor)
+      this.frameBuffer.drawText(`Repository: ${this.repository}`, 3, 3, this.labelColor)
+      this.drawSelectedLabels(5)
+      this.drawField("title", "Title", this.title, 7, 1)
+      this.drawField("body", "Body", this.body || "Optional description", 9, Math.max(3, this.height - 13))
 
       const help = "Tab switch fields · Ctrl+L labels · Ctrl+S create · Esc cancel"
-      this.frameBuffer.drawText(help, 2, this.height - 3, this.mutedColor)
+      this.frameBuffer.drawText(help, 3, this.height - 3, this.mutedColor)
       if (this.message) {
         const color = this.message === "Title is required." ? this.errorColor : this.labelColor
-        this.frameBuffer.drawText(truncate(this.message, this.width - 4), 2, this.height - 2, color)
+        this.frameBuffer.drawText(truncate(this.message, this.width - 5), 3, this.height - 2, color)
       }
 
       if (this.labelPickerOpen) this.drawLabelPicker()
@@ -584,6 +617,7 @@ class IssueCreatorRenderable extends Renderable {
     if (key.name === "backspace") {
       this.labelSearch = this.labelSearch.slice(0, -1)
       this.labelSelectedIndex = 0
+      this.labelScrollOffset = 0
       this.requestRender()
       return true
     }
@@ -591,6 +625,7 @@ class IssueCreatorRenderable extends Renderable {
     if (!key.ctrl && !key.meta && key.raw.length > 0 && !key.raw.includes("\x1b")) {
       this.labelSearch += key.raw.replace(/[\r\n]/g, "")
       this.labelSelectedIndex = 0
+      this.labelScrollOffset = 0
       this.requestRender()
       return true
     }
@@ -609,9 +644,9 @@ class IssueCreatorRenderable extends Renderable {
   }
 
   private drawSelectedLabels(y: number): void {
-    this.frameBuffer?.drawText("Labels", 2, y, this.labelColor)
+    this.frameBuffer?.drawText("Labels", 3, y, this.labelColor)
     const labels = this.selectedLabels.length > 0 ? this.selectedLabels.join(", ") : "none selected"
-    this.frameBuffer?.drawText(truncate(labels, this.width - 12), 10, y, this.selectedLabels.length > 0 ? this.textColor : this.mutedColor)
+    this.frameBuffer?.drawText(truncate(labels, this.width - 13), 11, y, this.selectedLabels.length > 0 ? this.textColor : this.mutedColor)
   }
 
   private filteredLabels(): ReadonlyArray<GitHubLabel> {
@@ -644,7 +679,11 @@ class IssueCreatorRenderable extends Renderable {
     this.selectedLabels = selected
       ? this.selectedLabels.filter((label) => labelKey(label) !== labelKey(option.name))
       : uniqueLabels([...this.selectedLabels, option.name])
-    this.labelSearch = option.kind === "create" ? "" : this.labelSearch
+    if (option.kind === "create") {
+      this.labelSearch = ""
+      this.labelSelectedIndex = 0
+      this.labelScrollOffset = 0
+    }
     this.requestRender()
   }
 
@@ -656,20 +695,21 @@ class IssueCreatorRenderable extends Renderable {
     const options = this.labelPickerOptions()
     this.labelSelectedIndex = Math.min(this.labelSelectedIndex, Math.max(0, options.length - 1))
 
-    this.frameBuffer?.fillRect(left, top, width, height, parseColor("#0d1117"))
-    this.frameBuffer?.fillRect(left, top, width, 1, this.borderColor)
-    this.frameBuffer?.fillRect(left, top + height - 1, width, 1, this.borderColor)
-    this.frameBuffer?.drawText(" Labels ", left + 2, top, this.titleColor)
-    this.frameBuffer?.drawText(`Search: ${this.labelSearch}_`, left + 2, top + 2, this.activeColor)
+    this.frameBuffer?.fillRect(0, 0, this.width, this.height, RGBA.fromInts(0, 0, 0, 150))
+    this.frameBuffer?.fillRect(left, top, width, height, parseColor(theme.surfaceRaised))
+    this.frameBuffer?.drawText(" Labels ", left + 2, top + 1, this.titleColor)
+    this.frameBuffer?.drawText(`Search: ${this.labelSearch}_`, left + 2, top + 3, this.activeColor)
 
-    const listTop = top + 4
-    const listHeight = Math.max(0, height - 6)
+    const listTop = top + 5
+    const listHeight = Math.max(0, height - 7)
+    this.updateLabelScrollOffset(listHeight)
     if (options.length === 0) {
       this.frameBuffer?.drawText("Type a label name to create it", left + 2, listTop, this.mutedColor)
     }
 
-    options.slice(0, listHeight).forEach((option, index) => {
-      const selected = index === this.labelSelectedIndex
+    options.slice(this.labelScrollOffset, this.labelScrollOffset + listHeight).forEach((option, index) => {
+      const optionIndex = this.labelScrollOffset + index
+      const selected = optionIndex === this.labelSelectedIndex
       const checked = this.selectedLabels.some((label) => labelKey(label) === labelKey(option.name))
       const y = listTop + index
       if (selected) this.frameBuffer?.fillRect(left + 1, y, width - 2, 1, this.activeColor)
@@ -682,12 +722,16 @@ class IssueCreatorRenderable extends Renderable {
     this.frameBuffer?.drawText("Enter/Space toggle · Esc close", left + 2, top + height - 2, this.mutedColor)
   }
 
-  private drawBox(): void {
-    this.frameBuffer?.fillRect(0, 0, this.width, 1, this.borderColor)
-    this.frameBuffer?.fillRect(0, this.height - 1, this.width, 1, this.borderColor)
-    for (let y = 1; y < this.height - 1; y++) {
-      this.frameBuffer?.drawText("│", 0, y, this.borderColor)
-      this.frameBuffer?.drawText("│", this.width - 1, y, this.borderColor)
+  private updateLabelScrollOffset(listHeight: number): void {
+    if (listHeight <= 0) {
+      this.labelScrollOffset = 0
+      return
+    }
+
+    if (this.labelSelectedIndex < this.labelScrollOffset) {
+      this.labelScrollOffset = this.labelSelectedIndex
+    } else if (this.labelSelectedIndex >= this.labelScrollOffset + listHeight) {
+      this.labelScrollOffset = this.labelSelectedIndex - listHeight + 1
     }
   }
 
@@ -695,8 +739,8 @@ class IssueCreatorRenderable extends Renderable {
     const active = this.activeField === field
     const y = labelY + 1
     const contentWidth = Math.max(0, this.width - 6)
-    this.frameBuffer?.drawText(`${label}${active ? " *" : ""}`, 2, labelY, active ? this.activeColor : this.labelColor)
-    this.frameBuffer?.fillRect(2, y, this.width - 4, height, parseColor(active ? "#161b22" : "#0d1117"))
+    this.frameBuffer?.drawText(`${label}${active ? " *" : ""}`, 3, labelY, active ? this.activeColor : this.labelColor)
+    this.frameBuffer?.fillRect(2, y, this.width - 4, height, this.backgroundColor)
 
     const allLines = value.split("\n")
     const lineOffset = active ? Math.max(0, allLines.length - height) : 0
@@ -729,14 +773,13 @@ class RepositoryPickerRenderable extends Renderable {
   private loading = false
   private spinnerFrame = 0
   private spinnerTimer: ReturnType<typeof setInterval> | null = null
-  private readonly backgroundColor = parseColor("#0d1117")
-  private readonly panelColor = parseColor("#161b22")
-  private readonly borderColor = parseColor("#30363d")
-  private readonly titleColor = parseColor("#58a6ff")
-  private readonly textColor = parseColor("#c9d1d9")
-  private readonly mutedColor = parseColor("#8b949e")
-  private readonly activeColor = parseColor("#1f6feb")
-  private readonly errorColor = parseColor("#f85149")
+  private readonly backgroundColor = parseColor(theme.background)
+  private readonly panelColor = parseColor(theme.surface)
+  private readonly titleColor = parseColor(theme.text)
+  private readonly textColor = parseColor(theme.text)
+  private readonly mutedColor = parseColor(theme.textMuted)
+  private readonly activeColor = parseColor(theme.blue)
+  private readonly errorColor = parseColor(theme.error)
   private readonly onSelect: (repository: string) => void
   private readonly onCancel: () => void
 
@@ -782,7 +825,7 @@ class RepositoryPickerRenderable extends Renderable {
 
   public setRepositories(repositories: ReadonlyArray<GitHubRepository>, message?: string): void {
     this.repositories = normalizeOwnedRepositories(repositories)
-    this.selectedIndex = 0
+    this.selectedIndex = this.repositories.length > 0 ? 2 : 0
     this.scrollOffset = 0
     this.loading = false
     this.stopSpinner()
@@ -838,10 +881,8 @@ class RepositoryPickerRenderable extends Renderable {
     if (!this.visible || !this.frameBuffer) return
 
     if (this.isDirty) {
-      this.frameBuffer.clear(this.backgroundColor)
-      this.drawBox()
-      this.frameBuffer.fillRect(1, 1, Math.max(0, this.width - 2), Math.max(0, this.height - 2), this.panelColor)
-      this.frameBuffer.drawText(" Make Issue in Other Repo ", 2, 0, this.titleColor)
+      this.frameBuffer.clear(this.panelColor)
+      this.frameBuffer.drawText(" Make Issue in Other Repo ", 2, 1, this.titleColor)
 
       if (this.loading) {
         this.drawLoadingSpinner()
@@ -861,13 +902,15 @@ class RepositoryPickerRenderable extends Renderable {
       }
 
       const options = this.repositoryOptions()
-      const listTop = 2
-      const listHeight = Math.max(0, this.height - 6)
+      const listTop = 3
+      const listHeight = Math.max(0, this.height - 7)
       this.selectedIndex = Math.min(this.selectedIndex, Math.max(0, options.length - 1))
       this.updateScrollOffset(listHeight)
 
       options.slice(this.scrollOffset, this.scrollOffset + listHeight).forEach((option, index) => {
         const optionIndex = this.scrollOffset + index
+        if (option.kind === "separator") return
+
         const selected = optionIndex === this.selectedIndex
         const y = listTop + index
         if (selected) this.frameBuffer?.fillRect(2, y, this.width - 4, 1, this.activeColor)
@@ -909,7 +952,10 @@ class RepositoryPickerRenderable extends Renderable {
   }
 
   private chooseSelectedOption(): void {
-    if (this.selectedIndex === 0) {
+    const option = this.repositoryOptions()[this.selectedIndex]
+    if (!option || option.kind === "separator") return
+
+    if (option.kind === "third-party") {
       this.mode = "third-party"
       this.repositoryInput = ""
       this.message = ""
@@ -917,23 +963,33 @@ class RepositoryPickerRenderable extends Renderable {
       return
     }
 
-    const repository = this.repositories[this.selectedIndex - 1]
-    if (repository) this.onSelect(repository.full_name)
+    if (option.repository) this.onSelect(option.repository)
   }
 
   private moveSelection(delta: number): void {
     const options = this.repositoryOptions()
     if (options.length === 0) return
 
-    this.selectedIndex = Math.max(0, Math.min(this.selectedIndex + delta, options.length - 1))
+    const direction = Math.sign(delta)
+    let nextIndex = this.selectedIndex + direction
+    while (nextIndex >= 0 && nextIndex < options.length && options[nextIndex]?.kind === "separator") {
+      nextIndex += direction
+    }
+
+    if (nextIndex < 0 || nextIndex >= options.length) return
+
+    this.selectedIndex = nextIndex
     this.requestRender()
   }
 
-  private repositoryOptions(): ReadonlyArray<{ readonly name: string }> {
+  private repositoryOptions(): ReadonlyArray<RepositoryPickerOption> {
     return [
-      { name: "Third-party repository..." },
+      { kind: "third-party", name: "Third-party repository..." },
+      { kind: "separator", name: "" },
       ...this.repositories.map((repository) => ({
+        kind: "repository" as const,
         name: `${repository.full_name}${repository.private ? " (private)" : ""}`,
+        repository: repository.full_name,
       })),
     ]
   }
@@ -976,9 +1032,9 @@ class RepositoryPickerRenderable extends Renderable {
   }
 
   private drawRepositoryInput(): void {
-    this.frameBuffer?.drawText("Repository", 2, 2, this.titleColor)
-    this.frameBuffer?.fillRect(2, 4, this.width - 4, 1, this.backgroundColor)
-    this.frameBuffer?.drawText(truncate(`${this.repositoryInput}_`, this.width - 6), 3, 4, this.textColor)
+    this.frameBuffer?.fillRect(2, 3, this.width - 4, 1, this.backgroundColor)
+    const input = this.repositoryInput ? `${this.repositoryInput}_` : "Owner/Repo"
+    this.frameBuffer?.drawText(truncate(input, this.width - 6), 3, 3, this.repositoryInput ? this.textColor : this.mutedColor)
     this.frameBuffer?.drawText("Enter owner/name - Esc back", 2, this.height - 3, this.mutedColor)
     if (this.message) {
       const color = this.message.startsWith("Use") ? this.errorColor : this.mutedColor
@@ -986,14 +1042,6 @@ class RepositoryPickerRenderable extends Renderable {
     }
   }
 
-  private drawBox(): void {
-    this.frameBuffer?.fillRect(0, 0, this.width, 1, this.borderColor)
-    this.frameBuffer?.fillRect(0, this.height - 1, this.width, 1, this.borderColor)
-    for (let y = 1; y < this.height - 1; y++) {
-      this.frameBuffer?.drawText("|", 0, y, this.borderColor)
-      this.frameBuffer?.drawText("|", this.width - 1, y, this.borderColor)
-    }
-  }
 }
 
 const loadIssues = Effect.gen(function* () {
@@ -1015,15 +1063,17 @@ const loadIssues = Effect.gen(function* () {
 })
 
 const createShell = (renderer: CliRenderer) => {
-  renderer.setBackgroundColor("#0d1117")
+  renderer.setBackgroundColor(theme.background)
 
   const bodyHeight = Math.max(8, renderer.terminalHeight - 6)
+  const compactLayout = renderer.terminalWidth < horizontalLayoutMinWidth
+  const compactListHeight = Math.max(4, Math.floor((bodyHeight - 1) * 0.5))
 
   const container = new BoxRenderable(renderer, {
     id: "muster-root",
     width: "auto",
     height: "auto",
-    backgroundColor: "#0d1117",
+    backgroundColor: theme.background,
     flexDirection: "column",
     paddingLeft: 1,
     paddingRight: 1,
@@ -1031,19 +1081,36 @@ const createShell = (renderer: CliRenderer) => {
   })
   renderer.root.add(container)
 
+  const headerRow = new BoxRenderable(renderer, {
+    id: "header-row",
+    width: "auto",
+    height: 1,
+    flexDirection: "row",
+  })
+  container.add(headerRow)
+
   const header = new TextRenderable(renderer, {
     id: "header",
-    content: "muster · GitHub issues involving you",
+    content: "muster",
+    width: 10,
     height: 1,
-    fg: "#58a6ff",
+    fg: theme.text,
   })
-  container.add(header)
+  headerRow.add(header)
+
+  const section = new TextRenderable(renderer, {
+    id: "section",
+    content: "Issues involving you",
+    height: 1,
+    fg: theme.textSubtle,
+  })
+  headerRow.add(section)
 
   const status = new TextRenderable(renderer, {
     id: "status",
     content: "Loading issues from GitHub CLI…",
     height: 1,
-    fg: "#8b949e",
+    fg: theme.textMuted,
   })
   container.add(status)
 
@@ -1051,7 +1118,7 @@ const createShell = (renderer: CliRenderer) => {
     id: "body",
     width: "auto",
     height: bodyHeight,
-    flexDirection: "row",
+    flexDirection: compactLayout ? "column" : "row",
     gap: 1,
     marginTop: 1,
   })
@@ -1059,8 +1126,10 @@ const createShell = (renderer: CliRenderer) => {
 
   const issueList = new IssueListRenderable(renderer, {
     id: "issue-list",
-    width: Math.max(48, Math.floor(renderer.terminalWidth * 0.58)),
-    height: bodyHeight,
+    width: compactLayout ? "100%" : "42%",
+    minWidth: compactLayout ? 0 : issueListMinWidth,
+    flexShrink: 1,
+    height: compactLayout ? compactListHeight : bodyHeight,
     onSelectionChange: (option) => {
       details.setOption(option)
     },
@@ -1069,20 +1138,35 @@ const createShell = (renderer: CliRenderer) => {
 
   const details = new IssueDetailsRenderable(renderer, {
     id: "details",
-    width: "auto",
+    width: compactLayout ? "100%" : "auto",
+    minWidth: compactLayout ? 0 : issueDetailsMinWidth,
     flexGrow: 1,
-    height: Math.max(7, bodyHeight - 1),
-    marginTop: 1,
+    flexShrink: 1,
+    height: compactLayout ? Math.max(1, bodyHeight - compactListHeight - 1) : Math.max(7, bodyHeight - 1),
+    marginTop: compactLayout ? 0 : 1,
   })
   body.add(details)
 
   const footer = new TextRenderable(renderer, {
     id: "footer",
-    content: "↑/↓ or j/k to move · enter to select · Ctrl+N new issue · Ctrl+O other repo · r to refresh · q to quit",
+    content: "↑/↓ or j/k to move · enter to select · Ctrl+N Create issue in this repo · Ctrl+O Create issue in other repo · r to refresh · q to quit",
     height: 1,
-    fg: "#8b949e",
+    fg: theme.textSubtle,
   })
   container.add(footer)
+
+  const issueBackdrop = new BoxRenderable(renderer, {
+    id: "issue-backdrop",
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: "100%",
+    height: "100%",
+    backgroundColor: RGBA.fromInts(0, 0, 0, 150),
+    zIndex: 19,
+    visible: false,
+  })
+  renderer.root.add(issueBackdrop)
 
   const issueCreator = new IssueCreatorRenderable(renderer, {
     id: "issue-creator",
@@ -1094,11 +1178,25 @@ const createShell = (renderer: CliRenderer) => {
     zIndex: 20,
     onSubmit: (draft) => createIssueFromDraft(shell, draft),
     onCancel: () => {
+      issueBackdrop.visible = false
       status.content = "Issue creation cancelled."
       issueList.focus()
     },
   })
   renderer.root.add(issueCreator)
+
+  const repositoryBackdrop = new BoxRenderable(renderer, {
+    id: "repository-backdrop",
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: "100%",
+    height: "100%",
+    backgroundColor: RGBA.fromInts(0, 0, 0, 150),
+    zIndex: 24,
+    visible: false,
+  })
+  renderer.root.add(repositoryBackdrop)
 
   const repositoryPicker = new RepositoryPickerRenderable(renderer, {
     id: "repository-picker",
@@ -1109,10 +1207,12 @@ const createShell = (renderer: CliRenderer) => {
     height: Math.min(18, renderer.terminalHeight - 4),
     zIndex: 25,
     onSelect: (repository) => {
+      repositoryBackdrop.visible = false
       repositoryPicker.close()
       openIssueCreatorForRepository(shell, repository)
     },
     onCancel: () => {
+      repositoryBackdrop.visible = false
       status.content = "Repository selection cancelled."
       issueList.focus()
     },
@@ -1128,24 +1228,64 @@ const createShell = (renderer: CliRenderer) => {
     height: 1,
     zIndex: 30,
     content: "",
-    fg: "#dbeafe",
-    bg: "#1f6feb",
+    fg: "#ffffff",
+    bg: theme.blue,
     visible: false,
   })
   renderer.root.add(createStatus)
 
   issueList.focus()
 
+  const updateLayout = (width = renderer.terminalWidth, height = renderer.terminalHeight): void => {
+    const nextBodyHeight = Math.max(8, height - 6)
+    const expanded = !issueList.visible
+    const compact = !expanded && width < horizontalLayoutMinWidth
+    const listHeight = Math.max(4, Math.floor((nextBodyHeight - 1) * 0.5))
+
+    body.height = nextBodyHeight
+    body.flexDirection = compact ? "column" : "row"
+
+    issueList.width = compact ? "100%" : "42%"
+    issueList.minWidth = compact ? 0 : issueListMinWidth
+    issueList.height = compact ? listHeight : nextBodyHeight
+
+    details.width = expanded || compact ? "100%" : "auto"
+    details.minWidth = compact ? 0 : issueDetailsMinWidth
+    details.height = expanded
+      ? Math.max(7, nextBodyHeight - 1)
+      : compact
+        ? Math.max(1, nextBodyHeight - listHeight - 1)
+        : Math.max(7, nextBodyHeight - 1)
+    details.marginTop = compact ? 0 : 1
+
+    const creatorWidth = Math.max(1, Math.min(82, width - 4))
+    const creatorHeight = Math.max(1, Math.min(20, height - 4))
+    issueCreator.width = creatorWidth
+    issueCreator.height = creatorHeight
+    issueCreator.left = Math.max(0, Math.floor((width - creatorWidth) / 2))
+    issueCreator.top = Math.max(0, Math.floor((height - creatorHeight) / 2))
+
+    const pickerWidth = Math.max(1, Math.min(70, width - 4))
+    const pickerHeight = Math.max(1, Math.min(18, height - 4))
+    repositoryPicker.width = pickerWidth
+    repositoryPicker.height = pickerHeight
+    repositoryPicker.left = Math.max(0, Math.floor((width - pickerWidth) / 2))
+    repositoryPicker.top = Math.max(0, Math.floor((height - pickerHeight) / 2))
+  }
+
   const shell = {
     status,
     issueList,
     details,
     issueCreator,
+    issueBackdrop,
     repositoryPicker,
+    repositoryBackdrop,
     createStatus,
     footer,
     repositoryCache: null as RepositoryCache | null,
     repositoryRefreshInFlight: false,
+    updateLayout,
   }
   return shell
 }
@@ -1159,7 +1299,8 @@ const expandSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
   shell.issueList.visible = false
   shell.details.width = "100%"
   shell.details.setExpanded(true)
-  shell.footer.content = "Esc collapse issue · Ctrl+N new issue · Ctrl+O other repo · r to refresh · q to quit"
+  shell.updateLayout()
+  shell.footer.content = "Esc collapse issue · Ctrl+N Create issue in this repo · Ctrl+O Create issue in other repo · r to refresh · q to quit"
   shell.status.content = "Issue expanded."
 }
 
@@ -1167,7 +1308,8 @@ const collapseSelectedIssue = (shell: ReturnType<typeof createShell>): void => {
   shell.issueList.visible = true
   shell.details.width = "auto"
   shell.details.setExpanded(false)
-  shell.footer.content = "↑/↓ or j/k to move · enter to select · Ctrl+N new issue · Ctrl+O other repo · r to refresh · q to quit"
+  shell.updateLayout()
+  shell.footer.content = "↑/↓ or j/k to move · enter to select · Ctrl+N Create issue in this repo · Ctrl+O Create issue in other repo · r to refresh · q to quit"
   shell.status.content = "Issue list restored."
   shell.issueList.focus()
 }
@@ -1210,6 +1352,7 @@ const openIssueCreatorForSelectedRepository = (shell: ReturnType<typeof createSh
 
 const openIssueCreatorForRepository = (shell: ReturnType<typeof createShell>, repository: string): void => {
   shell.status.content = `Creating a new issue in ${repository}.`
+  shell.issueBackdrop.visible = true
   shell.issueCreator.open(repository)
   shell.issueCreator.setMessage("Loading labels...")
 
@@ -1237,6 +1380,8 @@ const openIssueCreatorForRepository = (shell: ReturnType<typeof createShell>, re
 }
 
 const openRepositoryPicker = (shell: ReturnType<typeof createShell>): void => {
+  shell.repositoryBackdrop.visible = true
+
   if (shell.repositoryCache) {
     shell.status.content = "Showing cached repositories. Refreshing in the background."
     shell.repositoryPicker.openWithRepositories(shell.repositoryCache.repositories, "Refreshing repositories...")
@@ -1302,6 +1447,7 @@ const createIssueFromDraft = (shell: ReturnType<typeof createShell>, draft: Issu
   shell.createStatus.content = createMessage
   shell.createStatus.width = createMessage.length
   shell.createStatus.visible = true
+  shell.issueBackdrop.visible = false
   shell.issueCreator.close()
   shell.issueList.focus()
 
@@ -1333,6 +1479,8 @@ const createIssueFromDraft = (shell: ReturnType<typeof createShell>, draft: Issu
 const main = async (): Promise<void> => {
   const renderer = await createCliRenderer({ exitOnCtrlC: true })
   const shell = createShell(renderer)
+
+  renderer.on("resize", shell.updateLayout)
 
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
     if (shell.repositoryPicker.visible) {
