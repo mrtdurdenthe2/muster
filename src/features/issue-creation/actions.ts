@@ -1,14 +1,20 @@
 import { Effect } from "effect"
 import { appLayer, errorText } from "../../app/githubRuntime.js"
 import type { AppShell } from "../../app/shell.js"
+import type { AppState } from "../../app/state.js"
 import { GitHubIssues } from "../../services/GitHubIssues.js"
+import { repositoryIssuesTab, yourIssuesTab } from "../issues/issueTab.js"
 import type { IssueDraft } from "./model.js"
 
 const issueCreationStatusText = (repository: string): string => ` Creating issue in ${repository}... `
 
-export const openIssueCreatorForSelectedRepository = (shell: AppShell): void => {
+export const openIssueCreatorForSelectedRepository = (shell: AppShell, fallbackRepository?: string): void => {
   const selectedOption = shell.issueList.getSelectedOption()
   if (!selectedOption) {
+    if (fallbackRepository) {
+      openIssueCreatorForRepository(shell, fallbackRepository)
+      return
+    }
     shell.status.content = "Select a repository issue before creating a new issue."
     return
   }
@@ -34,7 +40,7 @@ export const openIssueCreatorForRepository = (shell: AppShell, repository: strin
       }),
     ),
   ).then((result) => {
-    if (!shell.issueCreator.visible) return
+    if (!shell.issueCreator.isOpenForRepository(repository)) return
 
     if (result._tag === "Failure") {
       shell.issueCreator.setMessage(`Unable to load labels: ${result.message}`)
@@ -45,7 +51,8 @@ export const openIssueCreatorForRepository = (shell: AppShell, repository: strin
   })
 }
 
-export const createIssueFromDraft = (shell: AppShell, draft: IssueDraft): void => {
+export const createIssueFromDraft = (shell: AppShell, state: AppState, draft: IssueDraft): void => {
+  const sourceTabID = state.issueTabs[state.activeIssueTabIndex]?.id
   const createMessage = issueCreationStatusText(draft.repository)
   shell.status.content = "Issue creator closed. Creating issue in the background..."
   shell.createStatus.content = createMessage
@@ -53,7 +60,7 @@ export const createIssueFromDraft = (shell: AppShell, draft: IssueDraft): void =
   shell.createStatus.visible = true
   shell.issueBackdrop.visible = false
   shell.issueCreator.close()
-  shell.issueList.focus()
+  shell.focusMain()
 
   Effect.runPromise(
     Effect.gen(function* () {
@@ -71,11 +78,16 @@ export const createIssueFromDraft = (shell: AppShell, draft: IssueDraft): void =
 
     if (result._tag === "Failure") {
       shell.status.content = "Unable to create issue."
-      shell.details.setMessage(result.message)
+      if (state.issueTabs[state.activeIssueTabIndex]?.id === sourceTabID) shell.details.setMessage(result.message)
       return
     }
 
+    for (const tabID of [yourIssuesTab.id, repositoryIssuesTab(draft.repository).id]) {
+      state.issueRequestVersions.set(tabID, (state.issueRequestVersions.get(tabID) ?? 0) + 1)
+    }
+    state.issueCache.delete(yourIssuesTab.id)
+    state.issueCache.delete(repositoryIssuesTab(draft.repository).id)
     shell.status.content = `Created issue in ${draft.repository}. Press r to refresh.`
-    shell.details.setMessage(result.result.url)
+    if (state.issueTabs[state.activeIssueTabIndex]?.id === sourceTabID) shell.details.setMessage(result.result.url)
   })
 }

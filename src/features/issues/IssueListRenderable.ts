@@ -7,7 +7,7 @@ import {
   type RenderableOptions,
 } from "@opentui/core"
 import { theme } from "../../ui/theme.js"
-import type { IssueOption } from "./issueOption.js"
+import { type IssueOption, issueMatchesSearch, issueOptionKey } from "./issueOption.js"
 
 interface IssueListRow {
   readonly kind: "header" | "issue"
@@ -35,10 +35,13 @@ const issuesGroupedByRepository = (options: ReadonlyArray<IssueOption>): Readonl
 export class IssueListRenderable extends Renderable {
   protected _focusable = true
 
+  private sourceOptions: IssueOption[] = []
   private _options: IssueOption[] = []
   private rows: ReadonlyArray<IssueListRow> = []
   private selectedIndex = 0
   private scrollOffset = 0
+  private searchQuery = ""
+  private _searching = false
   private readonly backgroundColor = parseColor(theme.surface)
   private readonly headerBackgroundColor = parseColor(theme.background)
   private readonly headerTextColor = parseColor(theme.textMuted)
@@ -66,12 +69,13 @@ export class IssueListRenderable extends Renderable {
   }
 
   public set options(options: ReadonlyArray<IssueOption>) {
-    this._options = [...options]
-    this.rows = issuesGroupedByRepository(this._options)
-    this.selectedIndex = this._options.length > 0 ? Math.min(this.selectedIndex, this._options.length - 1) : 0
-    this.updateScrollOffset()
-    this.onSelectionChange(this.getSelectedOption())
-    this.requestRender()
+    const selected = this.getSelectedOption()
+    this.sourceOptions = [...options]
+    this.applySearch(selected)
+  }
+
+  public get searching(): boolean {
+    return this._searching
   }
 
   public getSelectedOption(): IssueOption | null {
@@ -79,6 +83,17 @@ export class IssueListRenderable extends Renderable {
   }
 
   public handleKeyPress(key: KeyEvent): boolean {
+    if (this._searching) return this.handleSearchKeyPress(key)
+    if (!key.ctrl && !key.meta && !key.option && (key.name === "/" || key.raw === "/")) {
+      this._searching = true
+      this.updateScrollOffset()
+      this.requestRender()
+      return true
+    }
+    if (key.name === "escape" && this.searchQuery) {
+      this.setSearchQuery("")
+      return true
+    }
     if (key.name === "up" || key.name === "k") return this.moveSelection(-1)
     if (key.name === "down" || key.name === "j") return this.moveSelection(1)
     if (key.name === "return" || key.name === "linefeed") {
@@ -95,7 +110,22 @@ export class IssueListRenderable extends Renderable {
     if (this.isDirty) {
       this.frameBuffer.clear(this.backgroundColor)
       this.frameBuffer.fillRect(Math.max(0, this.width - 1), 0, 1, this.height, this.borderColor)
-      let y = -this.scrollOffset
+      const showSearch = this._searching || this.searchQuery.length > 0
+      let y = (showSearch ? 1 : 0) - this.scrollOffset
+
+      if (showSearch && this.height > 0) {
+        this.frameBuffer.fillRect(0, 0, Math.max(0, this.width - 1), 1, this.headerBackgroundColor)
+        const prompt = this.searchQuery || "name, author, #number, tag"
+        const cursor = this._searching ? "_" : ""
+        const count = `${this._options.length}/${this.sourceOptions.length}`
+        const available = Math.max(0, this.width - count.length - cursor.length - 5)
+        this.frameBuffer.drawText(` / ${prompt.slice(0, available)}${cursor}`, 0, 0, this.selectedTextColor)
+        this.frameBuffer.drawText(count, Math.max(0, this.width - count.length - 2), 0, this.descriptionColor)
+      }
+
+      if (this.rows.length === 0 && y >= 0 && y < this.height) {
+        this.frameBuffer.drawText("  No matching issues", 0, y, this.descriptionColor)
+      }
 
       for (const row of this.rows) {
         const rowHeight = row.kind === "header" ? 1 : 2
@@ -151,10 +181,62 @@ export class IssueListRenderable extends Renderable {
     }
     const selectedBottom = selectedTop + 2
 
+    const viewportHeight = Math.max(0, this.height - (this._searching || this.searchQuery ? 1 : 0))
     if (selectedTop < this.scrollOffset) {
       this.scrollOffset = selectedTop
-    } else if (selectedBottom > this.scrollOffset + this.height) {
-      this.scrollOffset = selectedBottom - this.height
+    } else if (selectedBottom > this.scrollOffset + viewportHeight) {
+      this.scrollOffset = Math.max(0, selectedBottom - viewportHeight)
     }
+  }
+
+  private handleSearchKeyPress(key: KeyEvent): boolean {
+    if (key.name === "escape") {
+      this._searching = false
+      this.setSearchQuery("")
+      return true
+    }
+    if (key.name === "return" || key.name === "linefeed") {
+      this._searching = false
+      this.updateScrollOffset()
+      this.requestRender()
+      return true
+    }
+    if (key.name === "up") return this.moveSelection(-1)
+    if (key.name === "down") return this.moveSelection(1)
+    if (key.name === "backspace") {
+      this.setSearchQuery(this.searchQuery.slice(0, -1))
+      return true
+    }
+    if (key.name === "space") {
+      this.setSearchQuery(`${this.searchQuery} `)
+      return true
+    }
+    if (!key.ctrl && !key.meta && !key.option && key.raw.length > 0 && !key.raw.includes("\x1b")) {
+      this.setSearchQuery(`${this.searchQuery}${key.raw}`)
+      return true
+    }
+    return true
+  }
+
+  private setSearchQuery(query: string): void {
+    const selected = this.getSelectedOption()
+    this.searchQuery = query
+    this.applySearch(selected)
+  }
+
+  private applySearch(selected: IssueOption | null): void {
+    this._options = this.searchQuery
+      ? this.sourceOptions.filter((option) => issueMatchesSearch(option, this.searchQuery))
+      : [...this.sourceOptions]
+    this.rows = issuesGroupedByRepository(this._options)
+    const selectedKey = selected ? issueOptionKey(selected) : null
+    const preservedIndex = selectedKey
+      ? this._options.findIndex((option) => issueOptionKey(option) === selectedKey)
+      : -1
+    this.selectedIndex = preservedIndex >= 0 ? preservedIndex : 0
+    this.scrollOffset = 0
+    this.updateScrollOffset()
+    this.onSelectionChange(this.getSelectedOption())
+    this.requestRender()
   }
 }

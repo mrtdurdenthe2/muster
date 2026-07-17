@@ -27,6 +27,7 @@ export class RepositoryPickerRenderable extends Renderable {
   private scrollOffset = 0
   private mode: RepositoryPickerMode = "select"
   private repositoryInput = ""
+  private title = "Make Issue in Other Repo"
   private message = ""
   private loading = false
   private spinnerFrame = 0
@@ -53,12 +54,13 @@ export class RepositoryPickerRenderable extends Renderable {
     this.onCancel = options.onCancel
   }
 
-  public openLoading(): void {
+  public openLoading(title = "Make Issue in Other Repo"): void {
     this.repositories = []
     this.selectedIndex = 0
     this.scrollOffset = 0
     this.mode = "select"
     this.repositoryInput = ""
+    this.title = title
     this.message = "Loading owned repositories..."
     this.loading = true
     this.visible = true
@@ -67,9 +69,14 @@ export class RepositoryPickerRenderable extends Renderable {
     this.requestRender()
   }
 
-  public openWithRepositories(repositories: ReadonlyArray<GitHubRepository>, message = ""): void {
+  public openWithRepositories(
+    repositories: ReadonlyArray<GitHubRepository>,
+    message = "",
+    title = "Make Issue in Other Repo",
+  ): void {
     this.mode = "select"
     this.repositoryInput = ""
+    this.title = title
     this.visible = true
     this.focus()
     this.setRepositories(repositories, message)
@@ -140,7 +147,7 @@ export class RepositoryPickerRenderable extends Renderable {
 
     if (this.isDirty) {
       this.frameBuffer.clear(this.panelColor)
-      this.frameBuffer.drawText(" Make Issue in Other Repo ", 2, 1, this.titleColor)
+      this.frameBuffer.drawText(truncate(` ${this.title} `, this.width - 4), 2, 1, this.titleColor)
 
       if (this.loading) {
         this.drawLoadingSpinner()

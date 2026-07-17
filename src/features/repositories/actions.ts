@@ -5,15 +5,27 @@ import type { AppState } from "../../app/state.js"
 import { GitHubIssues } from "../../services/GitHubIssues.js"
 import { normalizeOwnedRepositories, repositoryCacheFingerprint } from "./model.js"
 
-export const openRepositoryPicker = (shell: AppShell, state: AppState): void => {
+export interface RepositoryPickerCopy {
+  readonly title: string
+  readonly prompt: string
+}
+
+export const openRepositoryPicker = (shell: AppShell, state: AppState, copy: RepositoryPickerCopy): void => {
+  state.addIssueTabRequestVersion++
   shell.repositoryBackdrop.visible = true
+  state.repositoryPickerTitle = copy.title
+  state.repositoryPickerPrompt = copy.prompt
 
   if (state.repositoryCache) {
     shell.status.content = "Showing cached repositories. Refreshing in the background."
-    shell.repositoryPicker.openWithRepositories(state.repositoryCache.repositories, "Refreshing repositories...")
+    shell.repositoryPicker.openWithRepositories(
+      state.repositoryCache.repositories,
+      "Refreshing repositories...",
+      state.repositoryPickerTitle,
+    )
   } else {
     shell.status.content = "Loading owned repositories."
-    shell.repositoryPicker.openLoading()
+    shell.repositoryPicker.openLoading(state.repositoryPickerTitle)
   }
 
   refreshOwnedRepositories(shell, state)
@@ -58,7 +70,7 @@ export const refreshOwnedRepositories = (shell: AppShell, state: AppState): void
 
     if (!shell.repositoryPicker.visible) return
 
-    shell.status.content = "Choose a repository for the new issue."
+    shell.status.content = state.repositoryPickerPrompt
     if (changed) {
       shell.repositoryPicker.setRepositories(repositories)
     } else {

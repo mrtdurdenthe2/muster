@@ -5,18 +5,25 @@ import {
   openIssueCreatorForSelectedRepository,
 } from "../features/issue-creation/actions.js"
 import {
+  addRepositoryIssueTab,
   collapseSelectedIssue,
+  createCommentFromDraft,
   expandSelectedIssue,
   loadIssueComments,
+  openCommentComposer,
   refreshIssues,
+  selectIssueTab,
 } from "../features/issues/actions.js"
 import { openRepositoryPicker } from "../features/repositories/actions.js"
+import { registerIssueSyntaxParsers } from "../ui/syntax.js"
 import { createShell, type AppShell } from "./shell.js"
 import { createAppState } from "./state.js"
 
 export const main = async (): Promise<void> => {
+  registerIssueSyntaxParsers()
   const renderer = await createCliRenderer({ exitOnCtrlC: true })
   const state = createAppState()
+  let repositorySelection: "create-issue" | "add-tab" = "create-issue"
   let shell: AppShell
 
   shell = createShell(renderer, {
@@ -24,8 +31,16 @@ export const main = async (): Promise<void> => {
       shell.details.setOption(option)
       if (option) loadIssueComments(shell, state, option)
     },
-    onIssueSubmit: (draft) => createIssueFromDraft(shell, draft),
-    onRepositorySelected: (repository) => openIssueCreatorForRepository(shell, repository),
+    onIssueSubmit: (draft) => createIssueFromDraft(shell, state, draft),
+    onCommentSubmit: (draft) => createCommentFromDraft(shell, state, draft),
+    onRepositorySelected: (repository) => {
+      if (repositorySelection === "add-tab") {
+        addRepositoryIssueTab(shell, state, repository)
+        return
+      }
+      openIssueCreatorForRepository(shell, repository)
+    },
+    onIssueTabSelected: (index) => selectIssueTab(shell, state, index),
   })
 
   renderer.on("resize", shell.updateLayout)
@@ -43,9 +58,33 @@ export const main = async (): Promise<void> => {
       return
     }
 
+    if (shell.commentComposer.visible) {
+      key.stopPropagation()
+      shell.commentComposer.handleKeyPress(key)
+      return
+    }
+
+    if (shell.issueList.visible && shell.issueList.searching) {
+      key.stopPropagation()
+      shell.issueList.handleKeyPress(key)
+      return
+    }
+
     if (key.name === "escape" && !shell.issueList.visible) {
       key.stopPropagation()
       collapseSelectedIssue(shell)
+      return
+    }
+
+    if (key.name === "tab") {
+      key.stopPropagation()
+      if (state.issueTabs.length > 1) {
+        if (key.shift) {
+          shell.issueTabs.moveLeft()
+        } else {
+          shell.issueTabs.moveRight()
+        }
+      }
       return
     }
 
@@ -59,17 +98,35 @@ export const main = async (): Promise<void> => {
       expandSelectedIssue(shell)
       return
     }
-    if (key.name === "r") refreshIssues(shell)
-    if (key.ctrl && key.name === "n") {
+    if (key.name === "r") refreshIssues(shell, state)
+    if (!key.ctrl && !key.meta && !key.option && key.name === "c") {
       key.stopPropagation()
-      openIssueCreatorForSelectedRepository(shell)
+      openCommentComposer(shell)
     }
-    if (key.ctrl && key.name === "o") {
+    if (!key.ctrl && !key.meta && !key.option && key.name === "n") {
       key.stopPropagation()
-      openRepositoryPicker(shell, state)
+      state.addIssueTabRequestVersion++
+      const tab = state.issueTabs[state.activeIssueTabIndex]
+      openIssueCreatorForSelectedRepository(shell, tab?.kind === "repository" ? tab.repository : undefined)
+    }
+    if (!key.ctrl && !key.meta && !key.option && key.name === "o") {
+      key.stopPropagation()
+      repositorySelection = "create-issue"
+      openRepositoryPicker(shell, state, {
+        title: "Make Issue in Other Repo",
+        prompt: "Choose a repository for the new issue.",
+      })
+    }
+    if (!key.ctrl && !key.meta && !key.option && key.name === "a") {
+      key.stopPropagation()
+      repositorySelection = "add-tab"
+      openRepositoryPicker(shell, state, {
+        title: "Add Repository Tab",
+        prompt: "Choose a repository to add as a tab.",
+      })
     }
   })
 
-  refreshIssues(shell)
+  refreshIssues(shell, state)
   renderer.start()
 }

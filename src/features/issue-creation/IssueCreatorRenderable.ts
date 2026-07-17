@@ -91,6 +91,10 @@ export class IssueCreatorRenderable extends Renderable {
     this.requestRender()
   }
 
+  public isOpenForRepository(repository: string): boolean {
+    return this.visible && this.repository === repository
+  }
+
   public setSubmitting(submitting: boolean): void {
     this.submitting = submitting
     this.message = submitting ? "Creating issue..." : ""
@@ -123,7 +127,7 @@ export class IssueCreatorRenderable extends Renderable {
       return true
     }
 
-    if (key.ctrl && key.name === "l") {
+    if (!key.ctrl && !key.meta && !key.option && key.name === "f2") {
       this.labelPickerOpen = true
       this.labelSearch = ""
       this.labelSelectedIndex = 0
@@ -133,7 +137,7 @@ export class IssueCreatorRenderable extends Renderable {
       return true
     }
 
-    if (key.ctrl && key.name === "s") {
+    if (!key.ctrl && !key.meta && !key.option && key.name === "f3") {
       const title = this.title.trim()
       if (!title) {
         this.message = "Title is required."
@@ -200,7 +204,7 @@ export class IssueCreatorRenderable extends Renderable {
       this.drawField("title", "Title", this.title, 7, 1)
       this.drawField("body", "Body", this.body || "Optional description", 9, Math.max(3, this.height - 13))
 
-      const help = "Tab switch fields · Ctrl+L labels · Ctrl+S create · Esc cancel"
+      const help = "Tab switch fields · F2 labels · F3 create · Esc cancel"
       this.frameBuffer.drawText(help, 3, this.height - 3, this.mutedColor)
       if (this.message) {
         const color = this.message === "Title is required." ? this.errorColor : this.labelColor

@@ -88,12 +88,20 @@ export interface GitHubIssues {
     ReadonlyArray<GitHubIssue>,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
   >
+  readonly getRepository: (repository: string) => Effect.Effect<
+    GitHubRepository,
+    GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
+  >
   readonly listLabels: (repository: string) => Effect.Effect<
     ReadonlyArray<GitHubLabel>,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
   >
   readonly listComments: (repository: string, issueNumber: number) => Effect.Effect<
     ReadonlyArray<GitHubIssueComment>,
+    GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
+  >
+  readonly createComment: (repository: string, issueNumber: number, body: string) => Effect.Effect<
+    GitHubIssueComment,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
   >
   readonly listOwnedRepositories: () => Effect.Effect<
@@ -119,6 +127,9 @@ export const GitHubIssuesLive = Layer.effect(
 
     const listAssigned = (options?: IssueSearchOptions) => searchAssigned(options).pipe(Effect.map((response) => response.items))
 
+    const getRepository = (repository: string) =>
+      github.apiJson("getRepository", GitHubRepository, ["--method", "GET", `repos/${repository}`])
+
     const listLabels = (repository: string) =>
       github.apiJson("listRepositoryLabels", Schema.Array(GitHubLabel), ["--method", "GET", `repos/${repository}/labels`, "-F", "per_page=100"])
 
@@ -134,6 +145,15 @@ export const GitHubIssuesLive = Layer.effect(
           "per_page=100",
         ])
         .pipe(Effect.map((pages) => pages.flat()))
+
+    const createComment = (repository: string, issueNumber: number, body: string) =>
+      github.apiJson("createIssueComment", GitHubIssueComment, [
+        "--method",
+        "POST",
+        `repos/${repository}/issues/${issueNumber}/comments`,
+        "-f",
+        `body=${body}`,
+      ])
 
     const listOwnedRepositories = () =>
       github.apiJson("listOwnedRepositories", Schema.Array(GitHubRepository), [
@@ -186,8 +206,10 @@ export const GitHubIssuesLive = Layer.effect(
     return {
       searchAssigned,
       listAssigned,
+      getRepository,
       listLabels,
       listComments,
+      createComment,
       listOwnedRepositories,
       create,
       repositoryNameFromApiUrl,
