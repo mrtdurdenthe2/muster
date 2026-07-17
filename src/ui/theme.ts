@@ -7,6 +7,8 @@ export const theme = {
   surface: "#171717",
   surfaceRaised: "#1d1d1d",
   surfaceSelected: "#202a3a",
+  blueSurfaceSubtle: "#19283c",
+  redSurfaceSubtle: "#3a2020",
   border: "#2b2b2b",
   text: "#f4f4f5",
   textMuted: "#8b8b90",

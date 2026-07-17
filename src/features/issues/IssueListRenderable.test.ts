@@ -44,7 +44,7 @@ test("matches issue title, author, exact number, and tags", () => {
 })
 
 test("slash search filters the issue list and escape clears it", async () => {
-  const { renderer, mockInput, renderOnce, captureCharFrame } = await createTestRenderer({
+  const { renderer, mockInput, renderOnce, captureCharFrame, captureSpans } = await createTestRenderer({
     width: 60,
     height: 12,
   })
@@ -64,6 +64,7 @@ test("slash search filters the issue list and escape clears it", async () => {
     ]
     renderer.root.add(list)
     list.focus()
+    await renderOnce()
 
     mockInput.pressKey("/")
     await mockInput.typeText("author:alice")
@@ -72,7 +73,16 @@ test("slash search filters the issue list and escape clears it", async () => {
     expect(list.searching).toBe(true)
     expect(list.options.map((option) => option.value.issue.number)).toEqual([1])
     expect(captureCharFrame()).toContain("1/2")
+    expect(captureCharFrame()).toContain(" OPEN ")
     expect(searchQueries.at(-1)).toBe("author:alice")
+    const openTag = captureSpans().lines.flatMap((line) => line.spans).find((span) => span.text.includes(" OPEN "))
+    expect(openTag?.bg.b).toBeGreaterThan(openTag?.bg.r ?? 1)
+
+    list.issueStateFilter = "closed"
+    await renderOnce()
+    expect(captureCharFrame()).toContain(" CLOSED ")
+    const closedTag = captureSpans().lines.flatMap((line) => line.spans).find((span) => span.text.includes(" CLOSED "))
+    expect(closedTag?.bg.r).toBeGreaterThan(closedTag?.bg.b ?? 1)
 
     mockInput.pressEnter()
     await renderOnce()
@@ -84,6 +94,12 @@ test("slash search filters the issue list and escape clears it", async () => {
     expect(list.options).toHaveLength(2)
     expect(captureCharFrame()).not.toContain("author:alice")
     expect(searchQueries.at(-1)).toBe("")
+
+    list.options = []
+    list.loading = true
+    await renderOnce()
+    expect(captureCharFrame()).toContain("Loading issues...")
+    expect(captureCharFrame()).not.toContain("No matching issues")
   } finally {
     renderer.destroy()
   }

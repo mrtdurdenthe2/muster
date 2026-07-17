@@ -1,13 +1,13 @@
 import { createCliRenderer, type KeyEvent } from "@opentui/core"
 import {
   createIssueFromDraft,
-  openIssueCreatorForRepository,
   openIssueCreatorForSelectedRepository,
 } from "../features/issue-creation/actions.js"
 import {
   addRepositoryIssueTab,
   collapseSelectedIssue,
   createCommentFromDraft,
+  cycleIssueStateFilter,
   expandSelectedIssue,
   loadIssueComments,
   openCommentComposer,
@@ -24,7 +24,6 @@ export const main = async (): Promise<void> => {
   registerIssueSyntaxParsers()
   const renderer = await createCliRenderer({ exitOnCtrlC: true })
   const state = createAppState()
-  let repositorySelection: "create-issue" | "add-tab" = "create-issue"
   let shell: AppShell
 
   shell = createShell(renderer, {
@@ -35,13 +34,7 @@ export const main = async (): Promise<void> => {
     onIssueSearch: (query) => searchIssues(shell, state, query),
     onIssueSubmit: (draft) => createIssueFromDraft(shell, state, draft),
     onCommentSubmit: (draft) => createCommentFromDraft(shell, state, draft),
-    onRepositorySelected: (repository) => {
-      if (repositorySelection === "add-tab") {
-        addRepositoryIssueTab(shell, state, repository)
-        return
-      }
-      openIssueCreatorForRepository(shell, repository)
-    },
+    onRepositorySelected: (repository) => addRepositoryIssueTab(shell, state, repository),
     onIssueTabSelected: (index) => selectIssueTab(shell, state, index),
   })
 
@@ -113,15 +106,10 @@ export const main = async (): Promise<void> => {
     }
     if (!key.ctrl && !key.meta && !key.option && key.name === "o") {
       key.stopPropagation()
-      repositorySelection = "create-issue"
-      openRepositoryPicker(shell, state, {
-        title: "Make Issue in Other Repo",
-        prompt: "Choose a repository for the new issue.",
-      })
+      cycleIssueStateFilter(shell, state)
     }
     if (!key.ctrl && !key.meta && !key.option && key.name === "a") {
       key.stopPropagation()
-      repositorySelection = "add-tab"
       openRepositoryPicker(shell, state, {
         title: "Add Repository Tab",
         prompt: "Choose a repository to add as a tab.",

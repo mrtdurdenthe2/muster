@@ -1,7 +1,7 @@
 import { Effect } from "effect"
 import { GitHubIssues } from "../../services/GitHubIssues.js"
 import { issueMatchesSearch, issueToOption, type IssueOption } from "./issueOption.js"
-import type { IssueTab, IssueTabResult, RepositoryIssuesTab } from "./issueTab.js"
+import type { IssueStateFilter, IssueTab, IssueTabResult, RepositoryIssuesTab } from "./issueTab.js"
 
 const sortIssueOptions = (options: ReadonlyArray<IssueOption>): ReadonlyArray<IssueOption> =>
   [...options].sort((left, right) => {
@@ -23,7 +23,14 @@ export const issueNumberFromSearch = (query: string): number | null => {
 
 const quoteSearchValue = (value: string): string => `"${value.replace(/["\\]/g, "\\$&")}"`
 
-export const repositoryIssueSearchQuery = (repository: string, query: string): string => {
+const issueStateQualifier = (state: IssueStateFilter): ReadonlyArray<string> =>
+  state === "all" ? [] : [`is:${state}`]
+
+export const repositoryIssueSearchQuery = (
+  repository: string,
+  query: string,
+  state: IssueStateFilter,
+): string => {
   const terms: string[] = []
   const qualifiers: string[] = []
 
@@ -49,14 +56,24 @@ export const repositoryIssueSearchQuery = (repository: string, query: string): s
   }
 
   if (terms.length > 0) qualifiers.push("in:title")
-  return [`repo:${repository}`, "is:issue", ...terms, ...qualifiers, "sort:updated-desc"].join(" ")
+  return [
+    `repo:${repository}`,
+    "is:issue",
+    ...issueStateQualifier(state),
+    ...terms,
+    ...qualifiers,
+    "sort:updated-desc",
+  ].join(" ")
 }
 
-export const loadIssues = (tab: IssueTab) =>
+export const loadIssues = (tab: IssueTab, state: IssueStateFilter) =>
   Effect.gen(function* () {
     const issues = yield* GitHubIssues
     const response = yield* issues.searchAssigned({
-      query: tab.kind === "your-issues" ? undefined : `repo:${tab.repository} is:issue sort:updated-desc`,
+      query:
+        tab.kind === "your-issues"
+          ? ["involves:@me", "is:issue", "archived:false", ...issueStateQualifier(state)].join(" ")
+          : [`repo:${tab.repository}`, "is:issue", ...issueStateQualifier(state), "sort:updated-desc"].join(" "),
       limit: tab.kind === "your-issues" ? 50 : 100,
     })
     const options = sortIssueOptions(response.items.map((issue) => issueToOption(issue, issues)))
@@ -68,7 +85,11 @@ export const loadIssues = (tab: IssueTab) =>
     } satisfies IssueTabResult
   })
 
-export const searchRepositoryIssues = (tab: RepositoryIssuesTab, query: string) =>
+export const searchRepositoryIssues = (
+  tab: RepositoryIssuesTab,
+  query: string,
+  state: IssueStateFilter,
+) =>
   Effect.gen(function* () {
     const issues = yield* GitHubIssues
     const issueNumber = issueNumberFromSearch(query)
@@ -79,13 +100,16 @@ export const searchRepositoryIssues = (tab: RepositoryIssuesTab, query: string) 
           /(?:HTTP 404|Not Found)/i.test(error.detail) ? Effect.succeed(null) : Effect.fail(error),
         ),
       )
-      const option = issue && issue.pull_request === undefined ? issueToOption(issue, issues) : null
+      const option =
+        issue && issue.pull_request === undefined && (state === "all" || issue.state === state)
+          ? issueToOption(issue, issues)
+          : null
       const options = option && issueMatchesSearch(option, query) ? [option] : []
       return { total: options.length, options, incomplete: false } satisfies IssueTabResult
     }
 
     const response = yield* issues.searchAssigned({
-      query: repositoryIssueSearchQuery(tab.repository, query),
+      query: repositoryIssueSearchQuery(tab.repository, query, state),
       limit: 100,
     })
     const options = sortIssueOptions(

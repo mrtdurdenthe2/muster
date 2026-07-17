@@ -129,6 +129,7 @@ export const createShell = (renderer: CliRenderer, handlers: ShellHandlers): App
     minWidth: compactLayout ? 0 : issueListMinWidth,
     flexShrink: 1,
     height: compactLayout ? compactListHeight : bodyHeight,
+    issueStateFilter: "open",
     onSelectionChange: handlers.onIssueSelected,
     onSearchChange: handlers.onIssueSearch,
   })
@@ -146,7 +147,7 @@ export const createShell = (renderer: CliRenderer, handlers: ShellHandlers): App
   const footer = new TextRenderable(renderer, {
     id: "footer",
     content:
-      "Tab switch · / search · c comment · a add repo · ↑/↓ or j/k move · enter expand · n new issue · o other repo · r refresh · q quit",
+      "Tab switch · / search · o switch issue type · c comment · a add repo · ↑/↓ or j/k move · enter expand · n new issue · r refresh · q quit",
     height: 1,
     fg: theme.textSubtle,
   })

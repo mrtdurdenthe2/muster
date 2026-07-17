@@ -27,7 +27,7 @@ export class RepositoryPickerRenderable extends Renderable {
   private scrollOffset = 0
   private mode: RepositoryPickerMode = "select"
   private repositoryInput = ""
-  private title = "Make Issue in Other Repo"
+  private title = "Add Repository Tab"
   private message = ""
   private loading = false
   private spinnerFrame = 0
@@ -54,7 +54,7 @@ export class RepositoryPickerRenderable extends Renderable {
     this.onCancel = options.onCancel
   }
 
-  public openLoading(title = "Make Issue in Other Repo"): void {
+  public openLoading(title = "Add Repository Tab"): void {
     this.repositories = []
     this.selectedIndex = 0
     this.scrollOffset = 0
@@ -72,7 +72,7 @@ export class RepositoryPickerRenderable extends Renderable {
   public openWithRepositories(
     repositories: ReadonlyArray<GitHubRepository>,
     message = "",
-    title = "Make Issue in Other Repo",
+    title = "Add Repository Tab",
   ): void {
     this.mode = "select"
     this.repositoryInput = ""

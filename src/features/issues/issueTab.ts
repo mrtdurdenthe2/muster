@@ -15,6 +15,10 @@ export interface RepositoryIssuesTab {
 }
 
 export type IssueTab = YourIssuesTab | RepositoryIssuesTab
+export type IssueStateFilter = "open" | "closed" | "all"
+
+export const nextIssueStateFilter = (state: IssueStateFilter): IssueStateFilter =>
+  state === "open" ? "closed" : state === "closed" ? "all" : "open"
 
 export interface IssueTabResult {
   readonly total: number

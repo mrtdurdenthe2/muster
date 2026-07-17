@@ -5,7 +5,13 @@ import type { AppState } from "../../app/state.js"
 import { GitHubIssues } from "../../services/GitHubIssues.js"
 import type { CommentDraft } from "./commentDraft.js"
 import { type IssueOption, issueOptionKey } from "./issueOption.js"
-import { issueTabOption, repositoryIssuesTab, type IssueTab, type IssueTabResult } from "./issueTab.js"
+import {
+  issueTabOption,
+  nextIssueStateFilter,
+  repositoryIssuesTab,
+  type IssueTab,
+  type IssueTabResult,
+} from "./issueTab.js"
 import { loadIssues, searchRepositoryIssues } from "./queries.js"
 
 export const expandSelectedIssue = (shell: AppShell): void => {
@@ -19,7 +25,7 @@ export const expandSelectedIssue = (shell: AppShell): void => {
   shell.details.setExpanded(true)
   shell.updateLayout()
   shell.footer.content =
-    "j/k or arrows scroll · PgUp/PgDn · c comment · Tab switch · Esc collapse · n new issue · r refresh · q quit"
+    "j/k or arrows scroll · PgUp/PgDn · o switch issue type · c comment · Tab switch · Esc collapse · n new issue · r refresh · q quit"
   shell.status.content = "Issue expanded."
 }
 
@@ -29,7 +35,7 @@ export const collapseSelectedIssue = (shell: AppShell): void => {
   shell.details.setExpanded(false)
   shell.updateLayout()
   shell.footer.content =
-    "Tab switch · / search · c comment · a add repo · ↑/↓ or j/k move · enter expand · n new issue · o other repo · r refresh · q quit"
+    "Tab switch · / search · o switch issue type · c comment · a add repo · ↑/↓ or j/k move · enter expand · n new issue · r refresh · q quit"
   shell.status.content = "Issue list restored."
   shell.issueList.focus()
 }
@@ -138,6 +144,7 @@ const repositoryFailureText = (repository: string, message: string): string =>
     : message
 
 const showIssueTabResult = (shell: AppShell, tab: IssueTab, result: IssueTabResult): void => {
+  shell.issueList.loading = false
   shell.issueList.options = result.options
   shell.status.content =
     tab.kind === "your-issues"
@@ -150,6 +157,7 @@ const showIssueTabResult = (shell: AppShell, tab: IssueTab, result: IssueTabResu
 
 export const searchIssues = (shell: AppShell, state: AppState, query: string): void => {
   const tab = activeIssueTab(state)
+  const issueStateFilter = state.issueStateFilter
   const normalizedQuery = query.trim()
   const requestVersion = ++state.issueSearchRequestVersion
 
@@ -166,6 +174,7 @@ export const searchIssues = (shell: AppShell, state: AppState, query: string): v
 
   const cached = state.issueCache.get(tab.id)
   if (cached) shell.issueList.options = cached.options
+  shell.issueList.loading = true
   shell.status.content = `Searching all issues in ${tab.repository}…`
   Effect.runPromise(
     Effect.sleep("300 millis").pipe(
@@ -174,7 +183,7 @@ export const searchIssues = (shell: AppShell, state: AppState, query: string): v
         activeIssueTab(state).id !== tab.id ||
         shell.issueList.query.trim() !== normalizedQuery
           ? Effect.succeed(null)
-          : searchRepositoryIssues(tab, normalizedQuery),
+          : searchRepositoryIssues(tab, normalizedQuery, issueStateFilter),
       ),
       Effect.provide(appLayer),
       Effect.match({
@@ -186,12 +195,14 @@ export const searchIssues = (shell: AppShell, state: AppState, query: string): v
     if (
       requestVersion !== state.issueSearchRequestVersion ||
       activeIssueTab(state).id !== tab.id ||
+      state.issueStateFilter !== issueStateFilter ||
       shell.issueList.query.trim() !== normalizedQuery
     ) {
       return
     }
 
     if (result._tag === "Failure") {
+      shell.issueList.loading = false
       shell.status.content = `Unable to search ${tab.repository}: ${result.message}`
       return
     }
@@ -199,6 +210,7 @@ export const searchIssues = (shell: AppShell, state: AppState, query: string): v
     const searchResult = result.result
     if (!searchResult) return
 
+    shell.issueList.loading = false
     shell.issueList.options = searchResult.options
     shell.status.content =
       searchResult.options.length < searchResult.total
@@ -209,14 +221,20 @@ export const searchIssues = (shell: AppShell, state: AppState, query: string): v
 
 export const refreshIssues = (shell: AppShell, state: AppState): void => {
   const tab = activeIssueTab(state)
+  const issueStateFilter = state.issueStateFilter
   state.issueSearchRequestVersion++
   const requestVersion = (state.issueRequestVersions.get(tab.id) ?? 0) + 1
   state.issueRequestVersions.set(tab.id, requestVersion)
-  shell.status.content = tab.kind === "your-issues" ? "Loading your issues from GitHub CLI…" : `Loading issues from ${tab.repository}…`
+  const stateLabel = issueStateFilter === "all" ? "all" : issueStateFilter
+  shell.issueList.loading = true
+  shell.status.content =
+    tab.kind === "your-issues"
+      ? `Loading ${stateLabel} issues involving you…`
+      : `Loading ${stateLabel} issues from ${tab.repository}…`
   shell.details.setMessage("")
 
   Effect.runPromise(
-    loadIssues(tab).pipe(
+    loadIssues(tab, issueStateFilter).pipe(
       Effect.provide(appLayer),
       Effect.match({
         onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
@@ -224,10 +242,11 @@ export const refreshIssues = (shell: AppShell, state: AppState): void => {
       }),
     ),
   ).then((result) => {
-    if (requestVersion !== state.issueRequestVersions.get(tab.id)) return
+    if (requestVersion !== state.issueRequestVersions.get(tab.id) || state.issueStateFilter !== issueStateFilter) return
 
     if (result._tag === "Failure") {
       if (activeIssueTab(state).id !== tab.id) return
+      shell.issueList.loading = false
       shell.status.content = tab.kind === "your-issues" ? "Unable to load your issues." : `Unable to load ${tab.repository}.`
       shell.details.setMessage(
         tab.kind === "your-issues"
@@ -244,6 +263,17 @@ export const refreshIssues = (shell: AppShell, state: AppState): void => {
       searchIssues(shell, state, shell.issueList.query)
     }
   })
+}
+
+export const cycleIssueStateFilter = (shell: AppShell, state: AppState): void => {
+  state.issueStateFilter = nextIssueStateFilter(state.issueStateFilter)
+  shell.issueList.issueStateFilter = state.issueStateFilter
+  state.issueCache.clear()
+  state.issueSearchRequestVersion++
+  for (const tab of state.issueTabs) {
+    state.issueRequestVersions.set(tab.id, (state.issueRequestVersions.get(tab.id) ?? 0) + 1)
+  }
+  refreshIssues(shell, state)
 }
 
 export const selectIssueTab = (shell: AppShell, state: AppState, index: number): void => {

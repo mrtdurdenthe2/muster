@@ -1,6 +1,11 @@
 import type { GitHubIssueComment } from "../services/GitHubIssues.js"
 import type { RepositoryCache } from "../features/repositories/model.js"
-import { type IssueTab, type IssueTabResult, yourIssuesTab } from "../features/issues/issueTab.js"
+import {
+  type IssueStateFilter,
+  type IssueTab,
+  type IssueTabResult,
+  yourIssuesTab,
+} from "../features/issues/issueTab.js"
 
 export interface AppState {
   repositoryCache: RepositoryCache | null
@@ -10,6 +15,7 @@ export interface AppState {
   readonly commentRequestVersions: Map<string, number>
   readonly issueTabs: IssueTab[]
   activeIssueTabIndex: number
+  issueStateFilter: IssueStateFilter
   readonly issueRequestVersions: Map<string, number>
   readonly issueCache: Map<string, IssueTabResult>
   issueSearchRequestVersion: number
@@ -26,10 +32,11 @@ export const createAppState = (): AppState => ({
   commentRequestVersions: new Map(),
   issueTabs: [yourIssuesTab],
   activeIssueTabIndex: 0,
+  issueStateFilter: "open",
   issueRequestVersions: new Map(),
   issueCache: new Map(),
   issueSearchRequestVersion: 0,
   addIssueTabRequestVersion: 0,
-  repositoryPickerTitle: "Make Issue in Other Repo",
-  repositoryPickerPrompt: "Choose a repository for the new issue.",
+  repositoryPickerTitle: "Add Repository Tab",
+  repositoryPickerPrompt: "Choose a repository to add as a tab.",
 })

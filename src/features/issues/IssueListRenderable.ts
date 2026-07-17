@@ -7,7 +7,9 @@ import {
   type RenderableOptions,
 } from "@opentui/core"
 import { theme } from "../../ui/theme.js"
+import { truncate } from "../../ui/text.js"
 import { type IssueOption, issueMatchesSearch, issueOptionKey } from "./issueOption.js"
+import type { IssueStateFilter } from "./issueTab.js"
 
 interface IssueListRow {
   readonly kind: "header" | "issue"
@@ -42,6 +44,8 @@ export class IssueListRenderable extends Renderable {
   private scrollOffset = 0
   private searchQuery = ""
   private _searching = false
+  private _loading = false
+  private _issueStateFilter: IssueStateFilter
   private readonly backgroundColor = parseColor(theme.surface)
   private readonly headerBackgroundColor = parseColor(theme.background)
   private readonly headerTextColor = parseColor(theme.textMuted)
@@ -52,6 +56,9 @@ export class IssueListRenderable extends Renderable {
   private readonly selectedDescriptionColor = parseColor(theme.blueMuted)
   private readonly borderColor = parseColor(theme.background)
   private readonly selectedColor = parseColor(theme.blue)
+  private readonly stateBlueBackgroundColor = parseColor(theme.blueSurfaceSubtle)
+  private readonly stateRedBackgroundColor = parseColor(theme.redSurfaceSubtle)
+  private readonly stateClosedTextColor = parseColor(theme.error)
   private readonly onSelectionChange: (option: IssueOption | null) => void
   private readonly onSearchChange: (query: string) => void
 
@@ -60,11 +67,13 @@ export class IssueListRenderable extends Renderable {
     options: RenderableOptions<IssueListRenderable> & {
       onSelectionChange: (option: IssueOption | null) => void
       onSearchChange?: (query: string) => void
+      issueStateFilter?: IssueStateFilter
     },
   ) {
     super(ctx, { ...options, buffered: true })
     this.onSelectionChange = options.onSelectionChange
     this.onSearchChange = options.onSearchChange ?? (() => {})
+    this._issueStateFilter = options.issueStateFilter ?? "open"
   }
 
   public get options(): ReadonlyArray<IssueOption> {
@@ -83,6 +92,26 @@ export class IssueListRenderable extends Renderable {
 
   public get query(): string {
     return this.searchQuery
+  }
+
+  public get issueStateFilter(): IssueStateFilter {
+    return this._issueStateFilter
+  }
+
+  public get loading(): boolean {
+    return this._loading
+  }
+
+  public set loading(value: boolean) {
+    if (this._loading === value) return
+    this._loading = value
+    this.requestRender()
+  }
+
+  public set issueStateFilter(value: IssueStateFilter) {
+    if (this._issueStateFilter === value) return
+    this._issueStateFilter = value
+    this.requestRender()
   }
 
   public getSelectedOption(): IssueOption | null {
@@ -131,7 +160,7 @@ export class IssueListRenderable extends Renderable {
       }
 
       if (this.rows.length === 0 && y >= 0 && y < this.height) {
-        this.frameBuffer.drawText("  No matching issues", 0, y, this.descriptionColor)
+        this.frameBuffer.drawText(this._loading ? "  Loading issues..." : "  No matching issues", 0, y, this.descriptionColor)
       }
 
       for (const row of this.rows) {
@@ -145,7 +174,19 @@ export class IssueListRenderable extends Renderable {
         if (row.kind === "header") {
           if (y >= 0) {
             this.frameBuffer.fillRect(0, y, Math.max(0, this.width - 1), 1, this.headerBackgroundColor)
-            this.frameBuffer.drawText(`  ${row.repository?.toUpperCase() ?? ""}`, 0, y, this.headerTextColor)
+            const stateTag = ` ${this._issueStateFilter.toUpperCase()} `
+            const stateX = Math.max(2, this.width - stateTag.length - 2)
+            const repository = truncate(row.repository?.toUpperCase() ?? "", Math.max(0, stateX - 3))
+            this.frameBuffer.drawText(`  ${repository}`, 0, y, this.headerTextColor)
+            const closed = this._issueStateFilter === "closed"
+            this.frameBuffer.fillRect(
+              stateX,
+              y,
+              stateTag.length,
+              1,
+              closed ? this.stateRedBackgroundColor : this.stateBlueBackgroundColor,
+            )
+            this.frameBuffer.drawText(stateTag, stateX, y, closed ? this.stateClosedTextColor : this.selectedTextColor)
           }
         } else if (row.option && row.optionIndex !== undefined) {
           const selected = row.optionIndex === this.selectedIndex
