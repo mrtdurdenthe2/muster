@@ -18,6 +18,7 @@ import { horizontalLayoutMinWidth, issueDetailsMinWidth, issueListMinWidth, them
 
 export interface ShellHandlers {
   readonly onIssueSelected: (option: IssueOption | null) => void
+  readonly onIssueSearch: (query: string) => void
   readonly onIssueSubmit: (draft: IssueDraft) => void
   readonly onCommentSubmit: (draft: CommentDraft) => void
   readonly onRepositorySelected: (repository: string) => void
@@ -129,6 +130,7 @@ export const createShell = (renderer: CliRenderer, handlers: ShellHandlers): App
     flexShrink: 1,
     height: compactLayout ? compactListHeight : bodyHeight,
     onSelectionChange: handlers.onIssueSelected,
+    onSearchChange: handlers.onIssueSearch,
   })
   body.add(issueList)
   body.add(details)

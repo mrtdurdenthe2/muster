@@ -16,6 +16,7 @@ export const GitHubIssue = Schema.Struct({
     }),
   ),
   body: Schema.optionalWith(Schema.Union(Schema.String, Schema.Null), { default: () => null }),
+  pull_request: Schema.optional(Schema.Unknown),
   user: Schema.Struct({
     login: Schema.String,
   }),
@@ -92,6 +93,10 @@ export interface GitHubIssues {
     GitHubRepository,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
   >
+  readonly getIssue: (repository: string, issueNumber: number) => Effect.Effect<
+    GitHubIssue,
+    GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
+  >
   readonly listLabels: (repository: string) => Effect.Effect<
     ReadonlyArray<GitHubLabel>,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
@@ -129,6 +134,9 @@ export const GitHubIssuesLive = Layer.effect(
 
     const getRepository = (repository: string) =>
       github.apiJson("getRepository", GitHubRepository, ["--method", "GET", `repos/${repository}`])
+
+    const getIssue = (repository: string, issueNumber: number) =>
+      github.apiJson("getIssue", GitHubIssue, ["--method", "GET", `repos/${repository}/issues/${issueNumber}`])
 
     const listLabels = (repository: string) =>
       github.apiJson("listRepositoryLabels", Schema.Array(GitHubLabel), ["--method", "GET", `repos/${repository}/labels`, "-F", "per_page=100"])
@@ -207,6 +215,7 @@ export const GitHubIssuesLive = Layer.effect(
       searchAssigned,
       listAssigned,
       getRepository,
+      getIssue,
       listLabels,
       listComments,
       createComment,

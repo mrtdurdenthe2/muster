@@ -1,16 +1,39 @@
 {
-  "name": "muster",
+  "name": "@kaiwlsn/muster",
   "version": "0.1.0",
   "description": "TUI for managing your issues across the land of GitHub.",
   "type": "module",
   "private": true,
+  "license": "GPL-3.0-only",
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mrtdurdenthe2/muster.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mrtdurdenthe2/muster/issues"
+  },
+  "homepage": "https://github.com/mrtdurdenthe2/muster#readme",
+  "keywords": [
+    "github",
+    "issues",
+    "terminal",
+    "tui"
+  ],
   "bin": {
-    "muster": "./src/index.ts"
+    "muster": "./bin/muster.js"
   },
   "scripts": {
     "start": "bun run src/index.ts",
     "dev": "bun --watch src/index.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "bun test ./src/features/issues/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "build:standalone": "bun run scripts/build-standalone.ts",
+    "build:npm-packages": "bun run scripts/build-npm-packages.ts",
+    "package:smoke": "bun run scripts/package-smoke.ts",
+    "prepublishOnly": "printf '%s\n' 'Publish dist/npm/main, not the source checkout.' && exit 1"
   },
   "dependencies": {
     "@opentui/core": "latest",

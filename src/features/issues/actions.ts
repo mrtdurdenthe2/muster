@@ -6,7 +6,7 @@ import { GitHubIssues } from "../../services/GitHubIssues.js"
 import type { CommentDraft } from "./commentDraft.js"
 import { type IssueOption, issueOptionKey } from "./issueOption.js"
 import { issueTabOption, repositoryIssuesTab, type IssueTab, type IssueTabResult } from "./issueTab.js"
-import { loadIssues } from "./queries.js"
+import { loadIssues, searchRepositoryIssues } from "./queries.js"
 
 export const expandSelectedIssue = (shell: AppShell): void => {
   if (!shell.issueList.getSelectedOption()) {
@@ -148,8 +148,68 @@ const showIssueTabResult = (shell: AppShell, tab: IssueTab, result: IssueTabResu
   shell.details.setOption(shell.issueList.getSelectedOption())
 }
 
+export const searchIssues = (shell: AppShell, state: AppState, query: string): void => {
+  const tab = activeIssueTab(state)
+  const normalizedQuery = query.trim()
+  const requestVersion = ++state.issueSearchRequestVersion
+
+  if (!normalizedQuery) {
+    const cached = state.issueCache.get(tab.id)
+    if (cached) showIssueTabResult(shell, tab, cached)
+    return
+  }
+
+  if (tab.kind === "your-issues") {
+    shell.status.content = `${shell.issueList.options.length} matching loaded issues`
+    return
+  }
+
+  const cached = state.issueCache.get(tab.id)
+  if (cached) shell.issueList.options = cached.options
+  shell.status.content = `Searching all issues in ${tab.repository}…`
+  Effect.runPromise(
+    Effect.sleep("300 millis").pipe(
+      Effect.flatMap(() =>
+        requestVersion !== state.issueSearchRequestVersion ||
+        activeIssueTab(state).id !== tab.id ||
+        shell.issueList.query.trim() !== normalizedQuery
+          ? Effect.succeed(null)
+          : searchRepositoryIssues(tab, normalizedQuery),
+      ),
+      Effect.provide(appLayer),
+      Effect.match({
+        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
+        onSuccess: (result) => ({ _tag: "Success" as const, result }),
+      }),
+    ),
+  ).then((result) => {
+    if (
+      requestVersion !== state.issueSearchRequestVersion ||
+      activeIssueTab(state).id !== tab.id ||
+      shell.issueList.query.trim() !== normalizedQuery
+    ) {
+      return
+    }
+
+    if (result._tag === "Failure") {
+      shell.status.content = `Unable to search ${tab.repository}: ${result.message}`
+      return
+    }
+
+    const searchResult = result.result
+    if (!searchResult) return
+
+    shell.issueList.options = searchResult.options
+    shell.status.content =
+      searchResult.options.length < searchResult.total
+        ? `${searchResult.options.length} shown · ${searchResult.total} matches in ${tab.repository}${searchResult.incomplete ? " · partial GitHub result" : ""}`
+        : `${searchResult.options.length} matches in ${tab.repository}${searchResult.incomplete ? " · partial GitHub result" : ""}`
+  })
+}
+
 export const refreshIssues = (shell: AppShell, state: AppState): void => {
   const tab = activeIssueTab(state)
+  state.issueSearchRequestVersion++
   const requestVersion = (state.issueRequestVersions.get(tab.id) ?? 0) + 1
   state.issueRequestVersions.set(tab.id, requestVersion)
   shell.status.content = tab.kind === "your-issues" ? "Loading your issues from GitHub CLI…" : `Loading issues from ${tab.repository}…`
@@ -180,6 +240,9 @@ export const refreshIssues = (shell: AppShell, state: AppState): void => {
     state.issueCache.set(tab.id, result.result)
     if (activeIssueTab(state).id !== tab.id) return
     showIssueTabResult(shell, tab, result.result)
+    if (shell.issueList.query.trim()) {
+      searchIssues(shell, state, shell.issueList.query)
+    }
   })
 }
 
@@ -189,11 +252,15 @@ export const selectIssueTab = (shell: AppShell, state: AppState, index: number):
 
   state.activeIssueTabIndex = index
   state.addIssueTabRequestVersion++
+  state.issueSearchRequestVersion++
   shell.section.content = tab.kind === "your-issues" ? "Issues involving you" : `Issues in ${tab.repository}`
 
   const cached = state.issueCache.get(tab.id)
   if (cached) {
     showIssueTabResult(shell, tab, cached)
+    if (shell.issueList.query.trim()) {
+      searchIssues(shell, state, shell.issueList.query)
+    }
     return
   }
 

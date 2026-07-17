@@ -53,15 +53,18 @@ export class IssueListRenderable extends Renderable {
   private readonly borderColor = parseColor(theme.background)
   private readonly selectedColor = parseColor(theme.blue)
   private readonly onSelectionChange: (option: IssueOption | null) => void
+  private readonly onSearchChange: (query: string) => void
 
   constructor(
     ctx: CliRenderer,
     options: RenderableOptions<IssueListRenderable> & {
       onSelectionChange: (option: IssueOption | null) => void
+      onSearchChange?: (query: string) => void
     },
   ) {
     super(ctx, { ...options, buffered: true })
     this.onSelectionChange = options.onSelectionChange
+    this.onSearchChange = options.onSearchChange ?? (() => {})
   }
 
   public get options(): ReadonlyArray<IssueOption> {
@@ -76,6 +79,10 @@ export class IssueListRenderable extends Renderable {
 
   public get searching(): boolean {
     return this._searching
+  }
+
+  public get query(): string {
+    return this.searchQuery
   }
 
   public getSelectedOption(): IssueOption | null {
@@ -222,6 +229,7 @@ export class IssueListRenderable extends Renderable {
     const selected = this.getSelectedOption()
     this.searchQuery = query
     this.applySearch(selected)
+    this.onSearchChange(query)
   }
 
   private applySearch(selected: IssueOption | null): void {

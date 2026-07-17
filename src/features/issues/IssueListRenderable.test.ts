@@ -31,12 +31,15 @@ test("matches issue title, author, exact number, and tags", () => {
   const option = issueOption(42, "Fix startup crash", "Alice", ["type:bug", "priority:high"])
 
   expect(issueMatchesSearch(option, "startup")).toBe(true)
+  expect(issueMatchesSearch(option, "start")).toBe(false)
   expect(issueMatchesSearch(option, "@alice")).toBe(true)
   expect(issueMatchesSearch(option, "42")).toBe(true)
   expect(issueMatchesSearch(option, "#42")).toBe(true)
   expect(issueMatchesSearch(option, "#4")).toBe(false)
   expect(issueMatchesSearch(option, "type:bug")).toBe(true)
-  expect(issueMatchesSearch(option, "author:alice tag:priority")).toBe(true)
+  expect(issueMatchesSearch(option, "author:alice tag:priority:high")).toBe(true)
+  expect(issueMatchesSearch(option, "author:ali")).toBe(false)
+  expect(issueMatchesSearch(option, "tag:priority")).toBe(false)
   expect(issueMatchesSearch(option, "name:alice")).toBe(false)
 })
 
@@ -45,6 +48,7 @@ test("slash search filters the issue list and escape clears it", async () => {
     width: 60,
     height: 12,
   })
+  const searchQueries: string[] = []
 
   try {
     const list = new IssueListRenderable(renderer, {
@@ -52,6 +56,7 @@ test("slash search filters the issue list and escape clears it", async () => {
       width: "100%",
       height: "100%",
       onSelectionChange: () => {},
+      onSearchChange: (query) => searchQueries.push(query),
     })
     list.options = [
       issueOption(1, "Fix startup crash", "alice", ["bug"]),
@@ -67,6 +72,7 @@ test("slash search filters the issue list and escape clears it", async () => {
     expect(list.searching).toBe(true)
     expect(list.options.map((option) => option.value.issue.number)).toEqual([1])
     expect(captureCharFrame()).toContain("1/2")
+    expect(searchQueries.at(-1)).toBe("author:alice")
 
     mockInput.pressEnter()
     await renderOnce()
@@ -77,6 +83,7 @@ test("slash search filters the issue list and escape clears it", async () => {
     await renderOnce()
     expect(list.options).toHaveLength(2)
     expect(captureCharFrame()).not.toContain("author:alice")
+    expect(searchQueries.at(-1)).toBe("")
   } finally {
     renderer.destroy()
   }

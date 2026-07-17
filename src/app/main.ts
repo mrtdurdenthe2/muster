@@ -12,6 +12,7 @@ import {
   loadIssueComments,
   openCommentComposer,
   refreshIssues,
+  searchIssues,
   selectIssueTab,
 } from "../features/issues/actions.js"
 import { openRepositoryPicker } from "../features/repositories/actions.js"
@@ -31,6 +32,7 @@ export const main = async (): Promise<void> => {
       shell.details.setOption(option)
       if (option) loadIssueComments(shell, state, option)
     },
+    onIssueSearch: (query) => searchIssues(shell, state, query),
     onIssueSubmit: (draft) => createIssueFromDraft(shell, state, draft),
     onCommentSubmit: (draft) => createCommentFromDraft(shell, state, draft),
     onRepositorySelected: (repository) => {

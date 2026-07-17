@@ -12,20 +12,25 @@ muster uses the GitHub CLI for authentication so it does not manage or store Git
 
 Requirements:
 
-- Install `bun` from https://bun.sh/. This is currently required to run muster, but it is not expected to be needed later on.
 - Install `gh` from https://cli.github.com/.
 - Authenticate with `gh auth login --hostname github.com --web --scopes repo,read:org`.
 
 This project is still early, so expect bugs and inconsistencies.
 
-Install the `muster` command from this checkout:
+Install the prebuilt `muster` command from npm:
 
 ```sh
-npm link
+npm install --global @kaiwlsn/muster
 muster
 ```
 
-You can also launch it without linking by running `bun run start`.
+Prebuilt binaries support macOS and glibc-based Linux on arm64 and x64. Bun is embedded in the binary and is not required at runtime. The npm launcher requires Node.js 20 or newer.
+
+For development from this checkout, install [Bun](https://bun.sh/) and run `bun run start`. You can also use `npm link`; the development launcher falls back to the Bun source entrypoint.
+
+## License and Source
+
+muster is licensed under GPL-3.0-only. Corresponding source for each published binary is available from the matching version tag in this repository.
 
 ## Acknowledgments
 

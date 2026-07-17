@@ -12,6 +12,7 @@ export interface AppState {
   activeIssueTabIndex: number
   readonly issueRequestVersions: Map<string, number>
   readonly issueCache: Map<string, IssueTabResult>
+  issueSearchRequestVersion: number
   addIssueTabRequestVersion: number
   repositoryPickerTitle: string
   repositoryPickerPrompt: string
@@ -27,6 +28,7 @@ export const createAppState = (): AppState => ({
   activeIssueTabIndex: 0,
   issueRequestVersions: new Map(),
   issueCache: new Map(),
+  issueSearchRequestVersion: 0,
   addIssueTabRequestVersion: 0,
   repositoryPickerTitle: "Make Issue in Other Repo",
   repositoryPickerPrompt: "Choose a repository for the new issue.",
