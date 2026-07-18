@@ -13,6 +13,7 @@ export interface AppState {
   readonly commentCache: Map<string, ReadonlyArray<GitHubIssueComment>>
   readonly commentRequests: Set<string>
   readonly commentRequestVersions: Map<string, number>
+  readonly issueStateRequests: Set<string>
   readonly issueTabs: IssueTab[]
   activeIssueTabIndex: number
   issueStateFilter: IssueStateFilter
@@ -30,6 +31,7 @@ export const createAppState = (): AppState => ({
   commentCache: new Map(),
   commentRequests: new Set(),
   commentRequestVersions: new Map(),
+  issueStateRequests: new Set(),
   issueTabs: [yourIssuesTab],
   activeIssueTabIndex: 0,
   issueStateFilter: "open",

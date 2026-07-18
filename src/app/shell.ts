@@ -8,6 +8,7 @@ import { IssueCreatorRenderable } from "../features/issue-creation/IssueCreatorR
 import type { IssueDraft } from "../features/issue-creation/model.js"
 import { CommentComposerRenderable } from "../features/issues/CommentComposerRenderable.js"
 import type { CommentDraft } from "../features/issues/commentDraft.js"
+import { IssueCloseConfirmationRenderable } from "../features/issues/IssueCloseConfirmationRenderable.js"
 import { IssueDetailsRenderable } from "../features/issues/IssueDetailsRenderable.js"
 import { IssueListRenderable } from "../features/issues/IssueListRenderable.js"
 import { IssueTabBarRenderable } from "../features/issues/IssueTabBarRenderable.js"
@@ -21,6 +22,7 @@ export interface ShellHandlers {
   readonly onIssueSearch: (query: string) => void
   readonly onIssueSubmit: (draft: IssueDraft) => void
   readonly onCommentSubmit: (draft: CommentDraft) => void
+  readonly onIssueCloseConfirm: (option: IssueOption) => void
   readonly onRepositorySelected: (repository: string) => void
   readonly onIssueTabSelected: (index: number) => void
 }
@@ -33,6 +35,7 @@ export interface AppShell {
   readonly details: IssueDetailsRenderable
   readonly issueCreator: IssueCreatorRenderable
   readonly commentComposer: CommentComposerRenderable
+  readonly issueCloseConfirmation: IssueCloseConfirmationRenderable
   readonly issueBackdrop: BoxRenderable
   readonly repositoryPicker: RepositoryPickerRenderable
   readonly repositoryBackdrop: BoxRenderable
@@ -147,7 +150,7 @@ export const createShell = (renderer: CliRenderer, handlers: ShellHandlers): App
   const footer = new TextRenderable(renderer, {
     id: "footer",
     content:
-      "Tab switch · / search · o switch issue type · c comment · a add repo · ↑/↓ or j/k move · enter expand · n new issue · r refresh · q quit",
+      "Tab switch · / search · o switch issue type · c comment · x close/reopen · a add repo · ↑/↓ or j/k move · enter expand · n new issue · r refresh · q quit",
     height: 1,
     fg: theme.textSubtle,
   })
@@ -199,6 +202,23 @@ export const createShell = (renderer: CliRenderer, handlers: ShellHandlers): App
     },
   })
   renderer.root.add(commentComposer)
+
+  const issueCloseConfirmation = new IssueCloseConfirmationRenderable(renderer, {
+    id: "issue-close-confirmation",
+    position: "absolute",
+    left: Math.max(2, Math.floor((renderer.terminalWidth - Math.min(64, renderer.terminalWidth - 4)) / 2)),
+    top: Math.max(2, Math.floor((renderer.terminalHeight - Math.min(8, renderer.terminalHeight - 4)) / 2)),
+    width: Math.min(64, renderer.terminalWidth - 4),
+    height: Math.min(8, renderer.terminalHeight - 4),
+    zIndex: 22,
+    onConfirm: handlers.onIssueCloseConfirm,
+    onCancel: () => {
+      issueBackdrop.visible = false
+      status.content = "Issue close cancelled."
+      focusMain()
+    },
+  })
+  renderer.root.add(issueCloseConfirmation)
 
   const repositoryBackdrop = new BoxRenderable(renderer, {
     id: "repository-backdrop",
@@ -287,6 +307,13 @@ export const createShell = (renderer: CliRenderer, handlers: ShellHandlers): App
     commentComposer.left = Math.max(0, Math.floor((width - commentWidth) / 2))
     commentComposer.top = Math.max(0, Math.floor((height - commentHeight) / 2))
 
+    const confirmationWidth = Math.max(1, Math.min(64, width - 4))
+    const confirmationHeight = Math.max(1, Math.min(8, height - 4))
+    issueCloseConfirmation.width = confirmationWidth
+    issueCloseConfirmation.height = confirmationHeight
+    issueCloseConfirmation.left = Math.max(0, Math.floor((width - confirmationWidth) / 2))
+    issueCloseConfirmation.top = Math.max(0, Math.floor((height - confirmationHeight) / 2))
+
     const pickerWidth = Math.max(1, Math.min(70, width - 4))
     const pickerHeight = Math.max(1, Math.min(18, height - 4))
     repositoryPicker.width = pickerWidth
@@ -303,6 +330,7 @@ export const createShell = (renderer: CliRenderer, handlers: ShellHandlers): App
     details,
     issueCreator,
     commentComposer,
+    issueCloseConfirmation,
     issueBackdrop,
     repositoryPicker,
     repositoryBackdrop,

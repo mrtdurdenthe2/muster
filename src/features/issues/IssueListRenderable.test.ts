@@ -104,3 +104,39 @@ test("slash search filters the issue list and escape clears it", async () => {
     renderer.destroy()
   }
 })
+
+test("updates an issue without losing options hidden by local search", async () => {
+  const { renderer, mockInput } = await createTestRenderer({ width: 60, height: 12 })
+
+  try {
+    const list = new IssueListRenderable(renderer, {
+      id: "issue-list-update-test",
+      width: "100%",
+      height: "100%",
+      onSelectionChange: () => {},
+    })
+    const first = issueOption(1, "Fix startup crash", "alice", ["bug"])
+    const second = issueOption(2, "Document configuration", "bob", ["docs"])
+    list.options = [first, second]
+    renderer.root.add(list)
+    list.focus()
+
+    mockInput.pressKey("/")
+    await mockInput.typeText("startup")
+    expect(list.options).toHaveLength(1)
+
+    list.updateIssueOption(
+      { ...first, value: { ...first.value, issue: { ...first.value.issue, state: "closed" } } },
+      true,
+    )
+    mockInput.pressEscape()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(list.options.map((option) => option.value.issue.number)).toEqual([1, 2])
+    expect(list.options[0]?.value.issue.state).toBe("closed")
+
+    list.updateIssueOption(first, false)
+    expect(list.options.map((option) => option.value.issue.number)).toEqual([2])
+  } finally {
+    renderer.destroy()
+  }
+})

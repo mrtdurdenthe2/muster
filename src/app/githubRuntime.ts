@@ -1,9 +1,26 @@
-import { Layer, Match, ParseResult } from "effect"
+import { Effect, Layer, Match, ParseResult } from "effect"
 import { CommandError, JsonParseError } from "../services/CommandRunner.js"
 import { GitHubCliLive, GitHubCliUnauthenticated, GitHubCliUnavailable } from "../services/GitHubCli.js"
 import { GitHubIssuesLive } from "../services/GitHubIssues.js"
 
 export const appLayer = Layer.merge(GitHubCliLive, GitHubIssuesLive)
+
+export const forkEffect = <A, E>(
+  effect: Effect.Effect<A, E>,
+  handlers: {
+    readonly onFailure: (error: E) => void
+    readonly onSuccess: (value: A) => void
+  },
+): void => {
+  Effect.runFork(
+    effect.pipe(
+      Effect.matchEffect({
+        onFailure: (error) => Effect.sync(() => handlers.onFailure(error)),
+        onSuccess: (value) => Effect.sync(() => handlers.onSuccess(value)),
+      }),
+    ),
+  )
+}
 
 const renderAuthHelp = (error: GitHubCliUnavailable | GitHubCliUnauthenticated): string =>
   Match.value(error).pipe(

@@ -6,6 +6,7 @@ import {
 import {
   addRepositoryIssueTab,
   collapseSelectedIssue,
+  confirmCloseIssue,
   createCommentFromDraft,
   cycleIssueStateFilter,
   expandSelectedIssue,
@@ -14,6 +15,7 @@ import {
   refreshIssues,
   searchIssues,
   selectIssueTab,
+  toggleSelectedIssueState,
 } from "../features/issues/actions.js"
 import { openRepositoryPicker } from "../features/repositories/actions.js"
 import { registerIssueSyntaxParsers } from "../ui/syntax.js"
@@ -34,6 +36,7 @@ export const main = async (): Promise<void> => {
     onIssueSearch: (query) => searchIssues(shell, state, query),
     onIssueSubmit: (draft) => createIssueFromDraft(shell, state, draft),
     onCommentSubmit: (draft) => createCommentFromDraft(shell, state, draft),
+    onIssueCloseConfirm: (option) => confirmCloseIssue(shell, state, option),
     onRepositorySelected: (repository) => addRepositoryIssueTab(shell, state, repository),
     onIssueTabSelected: (index) => selectIssueTab(shell, state, index),
   })
@@ -41,6 +44,12 @@ export const main = async (): Promise<void> => {
   renderer.on("resize", shell.updateLayout)
 
   renderer.keyInput.on("keypress", (key: KeyEvent) => {
+    if (shell.issueCloseConfirmation.visible) {
+      key.stopPropagation()
+      shell.issueCloseConfirmation.handleKeyPress(key)
+      return
+    }
+
     if (shell.repositoryPicker.visible) {
       key.stopPropagation()
       shell.repositoryPicker.handleKeyPress(key)
@@ -107,6 +116,10 @@ export const main = async (): Promise<void> => {
     if (!key.ctrl && !key.meta && !key.option && key.name === "o") {
       key.stopPropagation()
       cycleIssueStateFilter(shell, state)
+    }
+    if (!key.ctrl && !key.meta && !key.option && key.name === "x") {
+      key.stopPropagation()
+      toggleSelectedIssueState(shell, state)
     }
     if (!key.ctrl && !key.meta && !key.option && key.name === "a") {
       key.stopPropagation()

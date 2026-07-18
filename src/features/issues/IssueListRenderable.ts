@@ -86,6 +86,15 @@ export class IssueListRenderable extends Renderable {
     this.applySearch(selected)
   }
 
+  public updateIssueOption(option: IssueOption, include: boolean): void {
+    const key = issueOptionKey(option)
+    const selected = this.getSelectedOption()
+    this.sourceOptions = include
+      ? this.sourceOptions.map((candidate) => issueOptionKey(candidate) === key ? option : candidate)
+      : this.sourceOptions.filter((candidate) => issueOptionKey(candidate) !== key)
+    this.applySearch(selected && issueOptionKey(selected) === key ? option : selected)
+  }
+
   public get searching(): boolean {
     return this._searching
   }

@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { appLayer, errorText } from "../../app/githubRuntime.js"
+import { appLayer, errorText, forkEffect } from "../../app/githubRuntime.js"
 import type { AppShell } from "../../app/shell.js"
 import type { AppState } from "../../app/state.js"
 import { GitHubIssues } from "../../services/GitHubIssues.js"
@@ -36,45 +36,41 @@ export const refreshOwnedRepositories = (shell: AppShell, state: AppState): void
 
   state.repositoryRefreshInFlight = true
 
-  Effect.runPromise(
+  forkEffect(
     Effect.gen(function* () {
       const issues = yield* GitHubIssues
       return yield* issues.listOwnedRepositories()
-    }).pipe(
-      Effect.provide(appLayer),
-      Effect.match({
-        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
-        onSuccess: (repositories) => ({ _tag: "Success" as const, repositories }),
-      }),
-    ),
-  ).then((result) => {
-    state.repositoryRefreshInFlight = false
+    }).pipe(Effect.provide(appLayer)),
+    {
+      onFailure: (error) => {
+        state.repositoryRefreshInFlight = false
+        if (!shell.repositoryPicker.visible) return
 
-    if (result._tag === "Failure") {
-      if (!shell.repositoryPicker.visible) return
+        const message = errorText(error)
+        if (state.repositoryCache) {
+          shell.status.content = "Showing cached repositories. Background refresh failed."
+          shell.repositoryPicker.setMessage(`Unable to refresh repositories: ${message}`)
+        } else {
+          shell.status.content = "Unable to load owned repositories."
+          shell.repositoryPicker.setMessage(`Unable to load repositories: ${message}`)
+        }
+      },
+      onSuccess: (result) => {
+        state.repositoryRefreshInFlight = false
+        const repositories = normalizeOwnedRepositories(result)
+        const fingerprint = repositoryCacheFingerprint(repositories)
+        const changed = state.repositoryCache?.fingerprint !== fingerprint
+        state.repositoryCache = { repositories, fingerprint }
 
-      if (state.repositoryCache) {
-        shell.status.content = "Showing cached repositories. Background refresh failed."
-        shell.repositoryPicker.setMessage(`Unable to refresh repositories: ${result.message}`)
-      } else {
-        shell.status.content = "Unable to load owned repositories."
-        shell.repositoryPicker.setMessage(`Unable to load repositories: ${result.message}`)
-      }
-      return
-    }
+        if (!shell.repositoryPicker.visible) return
 
-    const repositories = normalizeOwnedRepositories(result.repositories)
-    const fingerprint = repositoryCacheFingerprint(repositories)
-    const changed = state.repositoryCache?.fingerprint !== fingerprint
-    state.repositoryCache = { repositories, fingerprint }
-
-    if (!shell.repositoryPicker.visible) return
-
-    shell.status.content = state.repositoryPickerPrompt
-    if (changed) {
-      shell.repositoryPicker.setRepositories(repositories)
-    } else {
-      shell.repositoryPicker.setMessage("")
-    }
-  })
+        shell.status.content = state.repositoryPickerPrompt
+        if (changed) {
+          shell.repositoryPicker.setRepositories(repositories)
+        } else {
+          shell.repositoryPicker.setMessage("")
+        }
+      },
+    },
+  )
 }

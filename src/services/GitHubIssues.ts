@@ -6,7 +6,7 @@ export const GitHubIssue = Schema.Struct({
   html_url: Schema.String,
   number: Schema.Number,
   title: Schema.String,
-  state: Schema.String,
+  state: Schema.Literal("open", "closed"),
   repository_url: Schema.String,
   updated_at: Schema.String,
   labels: Schema.Array(
@@ -23,6 +23,7 @@ export const GitHubIssue = Schema.Struct({
 })
 
 export type GitHubIssue = typeof GitHubIssue.Type
+export type GitHubIssueState = GitHubIssue["state"]
 
 export const GitHubIssueComment = Schema.Struct({
   id: Schema.Number,
@@ -109,6 +110,10 @@ export interface GitHubIssues {
     GitHubIssueComment,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
   >
+  readonly setState: (repository: string, issueNumber: number, state: GitHubIssueState) => Effect.Effect<
+    GitHubIssue,
+    GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
+  >
   readonly listOwnedRepositories: () => Effect.Effect<
     ReadonlyArray<GitHubRepository>,
     GitHubCliUnavailable | GitHubCliUnauthenticated | CommandError | JsonParseError | ParseResult.ParseError
@@ -161,6 +166,15 @@ export const GitHubIssuesLive = Layer.effect(
         `repos/${repository}/issues/${issueNumber}/comments`,
         "-f",
         `body=${body}`,
+      ])
+
+    const setState = (repository: string, issueNumber: number, state: GitHubIssueState) =>
+      github.apiJson("setIssueState", GitHubIssue, [
+        "--method",
+        "PATCH",
+        `repos/${repository}/issues/${issueNumber}`,
+        "-f",
+        `state=${state}`,
       ])
 
     const listOwnedRepositories = () =>
@@ -219,6 +233,7 @@ export const GitHubIssuesLive = Layer.effect(
       listLabels,
       listComments,
       createComment,
+      setState,
       listOwnedRepositories,
       create,
       repositoryNameFromApiUrl,

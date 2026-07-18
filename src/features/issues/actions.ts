@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { appLayer, errorText } from "../../app/githubRuntime.js"
+import { appLayer, errorText, forkEffect } from "../../app/githubRuntime.js"
 import type { AppShell } from "../../app/shell.js"
 import type { AppState } from "../../app/state.js"
 import { GitHubIssues } from "../../services/GitHubIssues.js"
@@ -25,7 +25,7 @@ export const expandSelectedIssue = (shell: AppShell): void => {
   shell.details.setExpanded(true)
   shell.updateLayout()
   shell.footer.content =
-    "j/k or arrows scroll · PgUp/PgDn · o switch issue type · c comment · Tab switch · Esc collapse · n new issue · r refresh · q quit"
+    "j/k or arrows scroll · PgUp/PgDn · o switch issue type · c comment · x close/reopen · Tab switch · Esc collapse · n new issue · r refresh · q quit"
   shell.status.content = "Issue expanded."
 }
 
@@ -35,7 +35,7 @@ export const collapseSelectedIssue = (shell: AppShell): void => {
   shell.details.setExpanded(false)
   shell.updateLayout()
   shell.footer.content =
-    "Tab switch · / search · o switch issue type · c comment · a add repo · ↑/↓ or j/k move · enter expand · n new issue · r refresh · q quit"
+    "Tab switch · / search · o switch issue type · c comment · x close/reopen · a add repo · ↑/↓ or j/k move · enter expand · n new issue · r refresh · q quit"
   shell.status.content = "Issue list restored."
   shell.issueList.focus()
 }
@@ -55,28 +55,25 @@ const requestIssueComments = (shell: AppShell, state: AppState, option: IssueOpt
   const requestVersion = (state.commentRequestVersions.get(key) ?? 0) + 1
   state.commentRequestVersions.set(key, requestVersion)
   state.commentRequests.add(key)
-  Effect.runPromise(
+  forkEffect(
     Effect.gen(function* () {
       const issues = yield* GitHubIssues
       return yield* issues.listComments(value.repository, value.issue.number)
-    }).pipe(
-      Effect.provide(appLayer),
-      Effect.match({
-        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
-        onSuccess: (comments) => ({ _tag: "Success" as const, comments }),
-      }),
-    ),
-  ).then((result) => {
-    if (requestVersion !== state.commentRequestVersions.get(key)) return
-    state.commentRequests.delete(key)
-    if (result._tag === "Failure") {
-      shell.details.setCommentsError(key, result.message)
-      return
-    }
-
-    state.commentCache.set(key, result.comments)
-    shell.details.setComments(key, result.comments)
-  })
+    }).pipe(Effect.provide(appLayer)),
+    {
+      onFailure: (error) => {
+        if (requestVersion !== state.commentRequestVersions.get(key)) return
+        state.commentRequests.delete(key)
+        shell.details.setCommentsError(key, errorText(error))
+      },
+      onSuccess: (comments) => {
+        if (requestVersion !== state.commentRequestVersions.get(key)) return
+        state.commentRequests.delete(key)
+        state.commentCache.set(key, comments)
+        shell.details.setComments(key, comments)
+      },
+    },
+  )
 }
 
 export const loadIssueComments = (shell: AppShell, state: AppState, option: IssueOption): void => {
@@ -100,40 +97,104 @@ export const createCommentFromDraft = (shell: AppShell, state: AppState, draft: 
   const value = draft.option.value
   shell.commentComposer.setSubmitting(true)
 
-  Effect.runPromise(
+  forkEffect(
     Effect.gen(function* () {
       const issues = yield* GitHubIssues
       return yield* issues.createComment(value.repository, value.issue.number, draft.body)
-    }).pipe(
-      Effect.provide(appLayer),
-      Effect.match({
-        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
-        onSuccess: (comment) => ({ _tag: "Success" as const, comment }),
-      }),
-    ),
-  ).then((result) => {
-    if (result._tag === "Failure") {
-      shell.status.content = "Unable to add comment."
-      if (shell.commentComposer.isOpenFor(draft.option)) shell.commentComposer.setMessage(result.message)
-      return
-    }
+    }).pipe(Effect.provide(appLayer)),
+    {
+      onFailure: (error) => {
+        shell.status.content = "Unable to add comment."
+        if (shell.commentComposer.isOpenFor(draft.option)) shell.commentComposer.setMessage(errorText(error))
+      },
+      onSuccess: (comment) => {
+        state.commentRequestVersions.set(key, (state.commentRequestVersions.get(key) ?? 0) + 1)
+        state.commentRequests.delete(key)
+        const cached = state.commentCache.get(key)
+        if (cached) {
+          const comments = [...cached.filter((cachedComment) => cachedComment.id !== comment.id), comment]
+          state.commentCache.set(key, comments)
+          shell.details.setComments(key, comments)
+        } else {
+          requestIssueComments(shell, state, draft.option, true)
+        }
 
-    state.commentRequestVersions.set(key, (state.commentRequestVersions.get(key) ?? 0) + 1)
-    state.commentRequests.delete(key)
-    const cached = state.commentCache.get(key)
-    if (cached) {
-      const comments = [...cached.filter((comment) => comment.id !== result.comment.id), result.comment]
-      state.commentCache.set(key, comments)
-      shell.details.setComments(key, comments)
-    } else {
-      requestIssueComments(shell, state, draft.option, true)
-    }
+        shell.commentComposer.close()
+        shell.issueBackdrop.visible = false
+        shell.status.content = `Comment added to ${value.repository} #${value.issue.number}.`
+        shell.focusMain()
+      },
+    },
+  )
+}
 
-    shell.commentComposer.close()
-    shell.issueBackdrop.visible = false
-    shell.status.content = `Comment added to ${value.repository} #${value.issue.number}.`
-    shell.focusMain()
-  })
+const setIssueState = (shell: AppShell, state: AppState, option: IssueOption, nextState: "open" | "closed"): void => {
+  const key = issueOptionKey(option)
+  if (state.issueStateRequests.has(key)) {
+    shell.status.content = `Issue ${option.value.repository} #${option.value.issue.number} is already being updated.`
+    return
+  }
+
+  const value = option.value
+  const action = nextState === "closed" ? "Closing" : "Reopening"
+  state.issueStateRequests.add(key)
+  shell.status.content = `${action} ${value.repository} #${value.issue.number}...`
+
+  forkEffect(
+    Effect.gen(function* () {
+      const issues = yield* GitHubIssues
+      return yield* issues.setState(value.repository, value.issue.number, nextState)
+    }).pipe(Effect.provide(appLayer)),
+    {
+      onFailure: (error) => {
+        state.issueStateRequests.delete(key)
+        shell.status.content = `Unable to ${nextState === "closed" ? "close" : "reopen"} ${value.repository} #${value.issue.number}.`
+        if (nextState === "closed" && shell.issueCloseConfirmation.isOpenFor(option)) {
+          shell.issueCloseConfirmation.setMessage(errorText(error))
+        }
+      },
+      onSuccess: (issue) => {
+        state.issueStateRequests.delete(key)
+        shell.issueCloseConfirmation.close()
+        shell.issueBackdrop.visible = false
+        state.issueCache.clear()
+        state.issueSearchRequestVersion++
+        for (const tab of state.issueTabs) {
+          state.issueRequestVersions.set(tab.id, (state.issueRequestVersions.get(tab.id) ?? 0) + 1)
+        }
+
+        const updatedOption: IssueOption = {
+          ...option,
+          value: { ...value, issue },
+        }
+        const include = state.issueStateFilter === "all" || state.issueStateFilter === nextState
+        shell.issueList.updateIssueOption(updatedOption, include)
+        shell.status.content = `${nextState === "closed" ? "Closed" : "Reopened"} ${value.repository} #${value.issue.number}.`
+        shell.focusMain()
+      },
+    },
+  )
+}
+
+export const toggleSelectedIssueState = (shell: AppShell, state: AppState): void => {
+  const option = shell.issueList.getSelectedOption()
+  if (!option) {
+    shell.status.content = "Select an issue before closing or reopening it."
+    return
+  }
+
+  if (option.value.issue.state === "closed") {
+    setIssueState(shell, state, option, "open")
+    return
+  }
+
+  shell.issueBackdrop.visible = true
+  shell.issueCloseConfirmation.open(option)
+  shell.status.content = `Confirm closing ${option.value.repository} #${option.value.issue.number}.`
+}
+
+export const confirmCloseIssue = (shell: AppShell, state: AppState, option: IssueOption): void => {
+  setIssueState(shell, state, option, "closed")
 }
 
 const activeIssueTab = (state: AppState): IssueTab => state.issueTabs[state.activeIssueTabIndex] ?? state.issueTabs[0]
@@ -176,7 +237,13 @@ export const searchIssues = (shell: AppShell, state: AppState, query: string): v
   if (cached) shell.issueList.options = cached.options
   shell.issueList.loading = true
   shell.status.content = `Searching all issues in ${tab.repository}…`
-  Effect.runPromise(
+  const isStale = (): boolean =>
+    requestVersion !== state.issueSearchRequestVersion ||
+    activeIssueTab(state).id !== tab.id ||
+    state.issueStateFilter !== issueStateFilter ||
+    shell.issueList.query.trim() !== normalizedQuery
+
+  forkEffect(
     Effect.sleep("300 millis").pipe(
       Effect.flatMap(() =>
         requestVersion !== state.issueSearchRequestVersion ||
@@ -186,37 +253,24 @@ export const searchIssues = (shell: AppShell, state: AppState, query: string): v
           : searchRepositoryIssues(tab, normalizedQuery, issueStateFilter),
       ),
       Effect.provide(appLayer),
-      Effect.match({
-        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
-        onSuccess: (result) => ({ _tag: "Success" as const, result }),
-      }),
     ),
-  ).then((result) => {
-    if (
-      requestVersion !== state.issueSearchRequestVersion ||
-      activeIssueTab(state).id !== tab.id ||
-      state.issueStateFilter !== issueStateFilter ||
-      shell.issueList.query.trim() !== normalizedQuery
-    ) {
-      return
-    }
-
-    if (result._tag === "Failure") {
-      shell.issueList.loading = false
-      shell.status.content = `Unable to search ${tab.repository}: ${result.message}`
-      return
-    }
-
-    const searchResult = result.result
-    if (!searchResult) return
-
-    shell.issueList.loading = false
-    shell.issueList.options = searchResult.options
-    shell.status.content =
-      searchResult.options.length < searchResult.total
-        ? `${searchResult.options.length} shown · ${searchResult.total} matches in ${tab.repository}${searchResult.incomplete ? " · partial GitHub result" : ""}`
-        : `${searchResult.options.length} matches in ${tab.repository}${searchResult.incomplete ? " · partial GitHub result" : ""}`
-  })
+    {
+      onFailure: (error) => {
+        if (isStale()) return
+        shell.issueList.loading = false
+        shell.status.content = `Unable to search ${tab.repository}: ${errorText(error)}`
+      },
+      onSuccess: (searchResult) => {
+        if (isStale() || !searchResult) return
+        shell.issueList.loading = false
+        shell.issueList.options = searchResult.options
+        shell.status.content =
+          searchResult.options.length < searchResult.total
+            ? `${searchResult.options.length} shown · ${searchResult.total} matches in ${tab.repository}${searchResult.incomplete ? " · partial GitHub result" : ""}`
+            : `${searchResult.options.length} matches in ${tab.repository}${searchResult.incomplete ? " · partial GitHub result" : ""}`
+      },
+    },
+  )
 }
 
 export const refreshIssues = (shell: AppShell, state: AppState): void => {
@@ -233,35 +287,28 @@ export const refreshIssues = (shell: AppShell, state: AppState): void => {
       : `Loading ${stateLabel} issues from ${tab.repository}…`
   shell.details.setMessage("")
 
-  Effect.runPromise(
-    loadIssues(tab, issueStateFilter).pipe(
-      Effect.provide(appLayer),
-      Effect.match({
-        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
-        onSuccess: (result) => ({ _tag: "Success" as const, result }),
-      }),
-    ),
-  ).then((result) => {
-    if (requestVersion !== state.issueRequestVersions.get(tab.id) || state.issueStateFilter !== issueStateFilter) return
+  const isStale = (): boolean =>
+    requestVersion !== state.issueRequestVersions.get(tab.id) || state.issueStateFilter !== issueStateFilter
 
-    if (result._tag === "Failure") {
-      if (activeIssueTab(state).id !== tab.id) return
+  forkEffect(loadIssues(tab, issueStateFilter).pipe(Effect.provide(appLayer)), {
+    onFailure: (error) => {
+      if (isStale() || activeIssueTab(state).id !== tab.id) return
+      const message = errorText(error)
       shell.issueList.loading = false
       shell.status.content = tab.kind === "your-issues" ? "Unable to load your issues." : `Unable to load ${tab.repository}.`
       shell.details.setMessage(
         tab.kind === "your-issues"
-          ? result.message
-          : repositoryFailureText(tab.repository, result.message),
+          ? message
+          : repositoryFailureText(tab.repository, message),
       )
-      return
-    }
-
-    state.issueCache.set(tab.id, result.result)
-    if (activeIssueTab(state).id !== tab.id) return
-    showIssueTabResult(shell, tab, result.result)
-    if (shell.issueList.query.trim()) {
-      searchIssues(shell, state, shell.issueList.query)
-    }
+    },
+    onSuccess: (result) => {
+      if (isStale()) return
+      state.issueCache.set(tab.id, result)
+      if (activeIssueTab(state).id !== tab.id) return
+      showIssueTabResult(shell, tab, result)
+      if (shell.issueList.query.trim()) searchIssues(shell, state, shell.issueList.query)
+    },
   })
 }
 
@@ -303,35 +350,30 @@ export const addRepositoryIssueTab = (shell: AppShell, state: AppState, reposito
   shell.status.content = `Checking ${repository}…`
   shell.focusMain()
 
-  Effect.runPromise(
+  forkEffect(
     Effect.gen(function* () {
       const issues = yield* GitHubIssues
       return yield* issues.getRepository(repository)
-    }).pipe(
-      Effect.provide(appLayer),
-      Effect.match({
-        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
-        onSuccess: (result) => ({ _tag: "Success" as const, repository: result.full_name }),
-      }),
-    ),
-  ).then((result) => {
-    if (requestVersion !== state.addIssueTabRequestVersion) return
+    }).pipe(Effect.provide(appLayer)),
+    {
+      onFailure: (error) => {
+        if (requestVersion !== state.addIssueTabRequestVersion) return
+        shell.status.content = `Unable to add ${repository}.`
+        shell.details.setMessage(repositoryFailureText(repository, errorText(error)))
+      },
+      onSuccess: (result) => {
+        if (requestVersion !== state.addIssueTabRequestVersion) return
+        const nextTab = repositoryIssuesTab(result.full_name)
+        let index = state.issueTabs.findIndex((tab) => tab.id === nextTab.id)
+        if (index === -1) {
+          state.issueTabs.push(nextTab)
+          index = state.issueTabs.length - 1
+          shell.issueTabs.setOptions(state.issueTabs.map(issueTabOption))
+        }
 
-    if (result._tag === "Failure") {
-      shell.status.content = `Unable to add ${repository}.`
-      shell.details.setMessage(repositoryFailureText(repository, result.message))
-      return
-    }
-
-    const nextTab = repositoryIssuesTab(result.repository)
-    let index = state.issueTabs.findIndex((tab) => tab.id === nextTab.id)
-    if (index === -1) {
-      state.issueTabs.push(nextTab)
-      index = state.issueTabs.length - 1
-      shell.issueTabs.setOptions(state.issueTabs.map(issueTabOption))
-    }
-
-    shell.issueTabs.setSelectedIndex(index)
-    shell.focusMain()
-  })
+        shell.issueTabs.setSelectedIndex(index)
+        shell.focusMain()
+      },
+    },
+  )
 }

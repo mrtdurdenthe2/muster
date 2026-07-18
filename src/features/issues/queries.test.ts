@@ -47,7 +47,7 @@ test("extracts exact issue numbers", () => {
   expect(issueNumberFromSearch("name:42")).toBeNull()
 })
 
-test("exact number search fetches the issue directly", async () => {
+test("exact number search fetches the issue directly", () => {
   const requestedIssues: number[] = []
   const service = {
     getIssue: (_repository: string, issueNumber: number) => {
@@ -57,7 +57,7 @@ test("exact number search fetches the issue directly", async () => {
     repositoryNameFromApiUrl: () => "owner/repo",
   } as unknown as GitHubIssues
 
-  const result = await Effect.runPromise(
+  const result = Effect.runSync(
     searchRepositoryIssues(tab, "number:42 author:alice", "open").pipe(Effect.provideService(GitHubIssues, service)),
   )
 
@@ -65,7 +65,7 @@ test("exact number search fetches the issue directly", async () => {
   expect(result.options).toHaveLength(1)
   expect(result.options[0]?.value.issue.number).toBe(42)
 
-  const closedResult = await Effect.runPromise(
+  const closedResult = Effect.runSync(
     searchRepositoryIssues(tab, "number:42", "closed").pipe(Effect.provideService(GitHubIssues, service)),
   )
   expect(closedResult.options).toHaveLength(0)

@@ -1,5 +1,5 @@
 import { Effect } from "effect"
-import { appLayer, errorText } from "../../app/githubRuntime.js"
+import { appLayer, errorText, forkEffect } from "../../app/githubRuntime.js"
 import type { AppShell } from "../../app/shell.js"
 import type { AppState } from "../../app/state.js"
 import { GitHubIssues } from "../../services/GitHubIssues.js"
@@ -28,27 +28,22 @@ export const openIssueCreatorForRepository = (shell: AppShell, repository: strin
   shell.issueCreator.open(repository)
   shell.issueCreator.setMessage("Loading labels...")
 
-  Effect.runPromise(
+  forkEffect(
     Effect.gen(function* () {
       const issues = yield* GitHubIssues
       return yield* issues.listLabels(repository)
-    }).pipe(
-      Effect.provide(appLayer),
-      Effect.match({
-        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
-        onSuccess: (labels) => ({ _tag: "Success" as const, labels }),
-      }),
-    ),
-  ).then((result) => {
-    if (!shell.issueCreator.isOpenForRepository(repository)) return
-
-    if (result._tag === "Failure") {
-      shell.issueCreator.setMessage(`Unable to load labels: ${result.message}`)
-      return
-    }
-
-    shell.issueCreator.setAvailableLabels(result.labels)
-  })
+    }).pipe(Effect.provide(appLayer)),
+    {
+      onFailure: (error) => {
+        if (shell.issueCreator.isOpenForRepository(repository)) {
+          shell.issueCreator.setMessage(`Unable to load labels: ${errorText(error)}`)
+        }
+      },
+      onSuccess: (labels) => {
+        if (shell.issueCreator.isOpenForRepository(repository)) shell.issueCreator.setAvailableLabels(labels)
+      },
+    },
+  )
 }
 
 export const createIssueFromDraft = (shell: AppShell, state: AppState, draft: IssueDraft): void => {
@@ -62,32 +57,27 @@ export const createIssueFromDraft = (shell: AppShell, state: AppState, draft: Is
   shell.issueCreator.close()
   shell.focusMain()
 
-  Effect.runPromise(
+  forkEffect(
     Effect.gen(function* () {
       const issues = yield* GitHubIssues
       return yield* issues.create(draft)
-    }).pipe(
-      Effect.provide(appLayer),
-      Effect.match({
-        onFailure: (error) => ({ _tag: "Failure" as const, message: errorText(error) }),
-        onSuccess: (result) => ({ _tag: "Success" as const, result }),
-      }),
-    ),
-  ).then((result) => {
-    shell.createStatus.visible = false
-
-    if (result._tag === "Failure") {
-      shell.status.content = "Unable to create issue."
-      if (state.issueTabs[state.activeIssueTabIndex]?.id === sourceTabID) shell.details.setMessage(result.message)
-      return
-    }
-
-    for (const tabID of [yourIssuesTab.id, repositoryIssuesTab(draft.repository).id]) {
-      state.issueRequestVersions.set(tabID, (state.issueRequestVersions.get(tabID) ?? 0) + 1)
-    }
-    state.issueCache.delete(yourIssuesTab.id)
-    state.issueCache.delete(repositoryIssuesTab(draft.repository).id)
-    shell.status.content = `Created issue in ${draft.repository}. Press r to refresh.`
-    if (state.issueTabs[state.activeIssueTabIndex]?.id === sourceTabID) shell.details.setMessage(result.result.url)
-  })
+    }).pipe(Effect.provide(appLayer)),
+    {
+      onFailure: (error) => {
+        shell.createStatus.visible = false
+        shell.status.content = "Unable to create issue."
+        if (state.issueTabs[state.activeIssueTabIndex]?.id === sourceTabID) shell.details.setMessage(errorText(error))
+      },
+      onSuccess: (result) => {
+        shell.createStatus.visible = false
+        for (const tabID of [yourIssuesTab.id, repositoryIssuesTab(draft.repository).id]) {
+          state.issueRequestVersions.set(tabID, (state.issueRequestVersions.get(tabID) ?? 0) + 1)
+        }
+        state.issueCache.delete(yourIssuesTab.id)
+        state.issueCache.delete(repositoryIssuesTab(draft.repository).id)
+        shell.status.content = `Created issue in ${draft.repository}. Press r to refresh.`
+        if (state.issueTabs[state.activeIssueTabIndex]?.id === sourceTabID) shell.details.setMessage(result.url)
+      },
+    },
+  )
 }
