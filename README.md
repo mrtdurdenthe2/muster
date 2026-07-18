@@ -10,16 +10,16 @@ TUI for managing your issues across the land of GitHub.
 
 muster is a keyboard-driven GitHub issue client. It starts with issues involving your account, and lets you open individual repositories in tabs when you need to focus on one project.
 
-- [x] Browse issues involving you across repositories
-- [x] Add owned repositories or any accessible `owner/repo` as tabs
-- [x] Switch between open, closed, and all issues
-- [x] Search by title, author, issue number, or label
-- [x] Read issue descriptions, labels, metadata, and comments
-- [x] Write comments without leaving the TUI
-- [x] Create issues with a description and labels
-- [x] Create missing labels while creating an issue
-- [x] Close and reopen issues
-- [x] Navigate entirely from the keyboard, with an expanded reading view
+- Browse issues involving you across repositories
+- Add owned repositories or any accessible `owner/repo` as tabs
+- Switch between open, closed, and all issues
+- Search by title, author, issue number, or label
+- Read issue descriptions, labels, metadata, and comments
+- Write comments without leaving the TUI
+- Create issues with a description and labels
+- Create missing labels while creating an issue
+- Close and reopen issues
+- Navigate entirely from the keyboard, with an expanded reading view
 
 ## GitHub Access
 
